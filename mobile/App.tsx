@@ -16,13 +16,14 @@ type Ctx = Record<string, any>;
 type Step = { ts: number; agent: string; state: string; detail: string; from: 'recall' | 'backend' };
 type Photo = { id: number | string; ts: number; source: string; caption: string; jpeg_b64: string };
 type Line = { id: number; ts: number; text: string; source: string };
-type Settings = { recallUrl: string; recallToken: string; backendUrl: string; backendToken: string };
+type Settings = { recallUrl: string; recallToken: string; backendUrl: string; backendToken: string; glassesUrl: string };
 
 const DEFAULTS: Settings = {
   recallUrl: process.env.EXPO_PUBLIC_RECALL_URL ?? '',
   recallToken: process.env.EXPO_PUBLIC_RECALL_TOKEN ?? '',
   backendUrl: process.env.EXPO_PUBLIC_BACKEND_URL ?? '',
   backendToken: process.env.EXPO_PUBLIC_BACKEND_TOKEN ?? '',
+  glassesUrl: process.env.EXPO_PUBLIC_GLASSES_URL ?? '',
 };
 const KEY = 'brightblind.settings';
 
@@ -168,6 +169,7 @@ function SettingsModal({ open, value, onSave, onClose }: { open: boolean; value:
           {field('recallToken', 'Recall token', 'RECALL_TOKEN', true)}
           {field('backendUrl', 'Team backend address (optional)', 'https://…')}
           {field('backendToken', 'Backend dashboard token (optional)', 'DASHBOARD_TOKENS entry', true)}
+          {field('glassesUrl', 'Glasses link (iOS build; empty = Recall)', 'wss://…/ws?token=<glasses relay token>', true)}
           <View style={st.btnRow}>
             <Btn label="Save" tone="go" onPress={() => { onSave(v); onClose(); }} />
             <Btn label="Cancel" onPress={onClose} />
@@ -194,7 +196,8 @@ function Main() {
 
   const recall = useRecall(settings);
   const backend = useBackend(settings);
-  const phone = useGlasses(settings.recallUrl, settings.recallToken);  // native build only (available)
+  // Native build only (available). The glasses talk to the team backend's /ws when a glasses link is set.
+  const phone = useGlasses(settings.glassesUrl || settings.recallUrl, settings.glassesUrl ? '' : settings.recallToken);
   const phoneBand = useBand(settings.recallUrl, settings.recallToken); // band over this phone's Bluetooth
   const { ctx } = recall;
 

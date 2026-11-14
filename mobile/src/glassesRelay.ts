@@ -15,7 +15,8 @@ const MAX_LOG = 200;
 /** `https://x.trycloudflare.com` + token -> `wss://x.trycloudflare.com/glasses?token=...`. A full ws(s) URL is kept. */
 export function glassesWsUrl(base: string, token: string): string {
   let u = base.trim().replace(/\/+$/, '').replace(/^http/, 'ws');
-  if (!/\/glasses(\?|$)/.test(u)) u += '/glasses';
+  // A full socket address is kept as is: Recall's /glasses or the team backend's /ws.
+  if (!/\/(glasses|ws)(\?|$)/.test(u)) u += '/glasses';
   if (token && !/[?&]token=/.test(u)) u += (u.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
   return u;
 }
