@@ -35,6 +35,23 @@ backend: Pipecat voice loop (Deepgram STT ─ LLM ─ ElevenLabs TTS) + agents (
          transit on Google Maps, researcher) + dashboard for judges
 ```
 
+**Memory layer (Recall, Ismaël).** Next to the live loop, the band's day is kept as memory:
+
+```
+band mic ──> laptop: Pipecat (Deepgram Flux STT) ──> SQLite: every sentence + what the body was doing
+                                                       (still / walk / run, steps, taps)
+                                                         │
+                         Gemini 4 (gemini-4-hydrogen) ───┴──> memories (task, plan, person, fact, ...)
+                                                               and answers ("what did Sam want from me?")
+```
+
+One tap on the band keeps the last 30 seconds; a double-tap followed by a spoken question gets a spoken answer
+(Deepgram TTS on the laptop). A local page (`http://localhost:8100`) shows what was heard, the memories, and the
+band timeline. The same server runs on Railway (`recall/cloud.py`) for the phone. The backend's planner can use it
+as the user's long-term memory (for example the "usual stock" in the fridge scene) by sending
+`{"cmd": "ask", "text": "..."}` on Recall's own `/ws` (a separate server and protocol from the backend's `/ws`
+below).
+
 Two hubs, one backend. The band talks only to the laptop. The glasses talk only to the iPhone. The backend talks to both over one WebSocket server and is the only place with logic.
 
 ## Who does what
@@ -49,6 +66,11 @@ Two hubs, one backend. The band talks only to the laptop. The glasses talk only 
 - Accept `led` commands from the backend (colour feedback is useless for the user but great for the demo: blue = listening, green = looking, red = fall).
 - Auto-reconnect when the link drops (the kit has it). Must survive the band going out of range for ten seconds.
 - Deliverable by 14:00: `python3 band/relay.py <band number>` streams audio and events to the backend and prints what it sends.
+- **Recall, the memory layer** (`app.py`, `recall/`): see "Memory layer" under Architecture. Run it with
+  `.venv\Scripts\python.exe app.py --usb --port COM5` (or `--sim` with no band), then open
+  `http://localhost:8100`. Keys go in `.env` (copy `.env.example`): `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`.
+  The band takes one program at a time, so `app.py` and `band/relay.py` cannot both hold it: until Recall
+  forwards to the backend itself, run one or the other.
 
 ### Tarang: backend + agents (`backend/`)
 
@@ -108,6 +130,9 @@ If you need a field that is not here, add it to this table in the same commit as
 
 ```
 band/        Ismaël   Python relay for the Vexo Open band (kit is a git submodule or a copy, see band/README.md)
+app.py       Ismaël   Recall: runs the memory layer on the laptop with the band
+recall/      Ismaël   Recall: memory store, Gemini brain, Pipecat voice, local page; cloud.py + Dockerfile,
+                      railway.json, .github/workflows/backend.yml deploy it to Railway
 backend/     Tarang   WebSocket server, Pipecat pipeline, agents, dashboard
 ios/         Andrii   Swift relay app, XcodeGen project, GitHub Actions build
 docs/        all      contract.md (this table, kept in sync), demo script, judging notes
@@ -140,7 +165,8 @@ If a teammate pointed you at this file, you are working on one of the three part
 
 1. Ask which role you are helping: `band/` (Ismaël), `backend/` (Tarang) or `ios/` (Andrii). Work only inside that folder.
 2. Read the WebSocket contract above. Your code must send and accept exactly those message types. Do not invent new ones silently; if one is missing, add it to the table in `docs/contract.md` and tell the human.
-3. Keep logic in `backend/`. The band relay and the glasses relay are dumb pipes: they forward data up and execute commands down. Do not put scene logic, prompts or model calls in `band/` or `ios/`.
+3. Keep the live loop's logic in `backend/`. The exception is Recall (`app.py`, `recall/`, Ismaël's): the memory
+   layer has its own Pipecat pipeline and Gemini calls. The band relay and the glasses relay are dumb pipes: they forward data up and execute commands down. Do not put scene logic, prompts or model calls in `band/` or `ios/`.
 4. Never write an API key into a file that is tracked by git. Read keys from environment variables or `.env`.
 5. For `band/`: the kit is the source of truth, `vexo-open-kit/AGENTS.md` and `vexo-open-kit/docs/api.md`. Ask for the band number, never guess it. One program on the band at a time.
 6. For `ios/`: the SDK is `meta-wearables-dat-ios` 1.0.1. Check signatures against the `.swiftinterface` files in the xcframework, not from memory. Session only via `SpecificDeviceSelector`. Order: `addCamera` → `stream.start` → on `.streaming` attach photo and inputs. Builds run in GitHub Actions; there is no Mac, so every build costs 15–20 minutes: batch changes.
