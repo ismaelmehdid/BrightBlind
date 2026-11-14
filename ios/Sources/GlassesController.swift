@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import UIKit
 import MWDATCore
 import MWDATCamera
@@ -70,7 +71,10 @@ final class GlassesController: ObservableObject {
         lines.append("\(stamp) \(s)")
         if lines.count > 300 { lines.removeFirst(lines.count - 300) }
         print("[SecondVision] \(s)")
+        // os_log so the line is visible in the device syslog from a Linux laptop (pymobiledevice3 syslog live).
+        Self.oslog.notice("\(s, privacy: .public)")
     }
+    private static let oslog = Logger(subsystem: "com.andriidrok.secondvision", category: "relay")
 
     private static let clock: DateFormatter = {
         let f = DateFormatter()
