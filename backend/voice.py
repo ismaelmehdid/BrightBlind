@@ -69,8 +69,8 @@ class GlassesOutput(FrameProcessor):
                     process.kill(); await process.wait(); raise
                 if process.returncode or not audio: raise RuntimeError('MP3 encoding failed')
                 self.owner.muted_until = time.monotonic() + len(pcm)/(self.sample_rate*2) + .4
-                await self.owner.coordinator.send('glasses', {'type': 'say', 'audio_b64': base64.b64encode(audio).decode(), 'interrupt': True})
-                self.owner.coordinator.log(self.owner.tts_name + ' via Pipecat', 'audio_sent', 'MP3 sent to glasses relay',
+                delivered = await self.owner.coordinator.send('glasses', {'type': 'say', 'audio_b64': base64.b64encode(audio).decode(), 'interrupt': True})
+                self.owner.coordinator.log(self.owner.tts_name + ' via Pipecat', 'audio_sent' if delivered else 'audio_undelivered', 'MP3 sent to glasses relay' if delivered else 'MP3 generated but relay delivery failed',
                                            tts_to_encoded_audio_ms=round((time.monotonic()-self.started)*1000))
             except Exception:
                 self.owner.coordinator.log('Voice', 'failed', 'Could not encode or relay speech audio.')

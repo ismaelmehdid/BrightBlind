@@ -97,7 +97,7 @@ The helper identifies the VexoHacks-7088 project, requires existing project bill
 
 Reference: [Google Routes setup](https://developers.google.com/maps/documentation/routes/get-api-key).
 
-LIVE_ONLY=1 is the default. Requests are blocked when the band relay, glasses relay, Meta camera connection or essential provider keys are missing. Server speech does not silently fall back to system voice. Isolated engineering tests set LIVE_ONLY=0; they do not constitute a hardware demo. Relay state is not hardware attestation: the actual devices still need an observed end-to-end check.
+LIVE_ONLY=1 is the default. Camera requests are blocked when the glasses relay, Meta camera connection or essential provider keys are missing. A typed request can exercise real glasses without a band; the complete hands-free readiness check still requires the band relay. Server speech does not silently fall back to system voice. Isolated engineering tests set LIVE_ONLY=0; they do not constitute a hardware demo. Relay state is not hardware attestation: the actual devices still need an observed end-to-end check.
 
 ## Deploy as a team server
 
@@ -139,3 +139,5 @@ Real Deepgram Flux TTS has also passed a speech-in/speech-out test through Pipec
 Tarang chose Deepgram speech output to avoid requiring a fourth provider key. This overrides the earlier root README voice-stack choice without changing any relay message.
 
 Maps setup completed on November 14 using the event account. The Routes API is enabled, its dedicated key is API-restricted and stored only in the private .env, and both a direct route request and the backend transit adapter returned live results. See maps-verification.json. Credit-balance deductions have not been independently verified.
+
+Gemini planner and vision calls now explicitly use GEMINI_THINKING_LEVEL=LOW. Common bus/food requests route directly; other requests use Gemini at the selected level. Bus timing requests refresh the saved route through Google Maps and speak minutes until its returned departure estimate. Expired estimates are not described as the next bus. Camera requests receive a short spoken acknowledgement while analysis runs.

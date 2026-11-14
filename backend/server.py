@@ -84,7 +84,7 @@ def make_app(providers=None):
 
     @app.post('/api/question', status_code=202)
     async def question(body: Question):
-        missing = app.state.coordinator.live_missing()
+        missing = app.state.coordinator.live_missing(require_band=False)
         if os.getenv('LIVE_ONLY', '1') == '1' and missing:
             return JSONResponse({'detail': 'Live workflow missing: ' + ', '.join(missing)}, status_code=503)
         await app.state.coordinator.voice.question(body.text)

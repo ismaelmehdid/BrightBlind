@@ -9,6 +9,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from transit_speech import transit_speech
 
 
 class Coordinator:
@@ -38,8 +39,9 @@ class Coordinator:
         self.glasses_state = 'disconnected'
         self.providers.audit = self.log
 
-    def live_missing(self):
-        missing = [role + ' relay' for role in ('band', 'glasses') if role not in self.clients]
+    def live_missing(self, require_band=True):
+        roles = ('band', 'glasses') if require_band else ('glasses',)
+        missing = [role + ' relay' for role in roles if role not in self.clients]
         if self.glasses_state not in ('connected', 'streaming'): missing.append('Meta camera connection')
         required = ['DEEPGRAM_API_KEY', 'GEMINI_API_KEY']
         if os.getenv('VOICE_TTS_PROVIDER') == 'elevenlabs': required.append('ELEVENLABS_API_KEY')
@@ -107,8 +109,9 @@ class Coordinator:
             await self.stop()
             await self.voice.interrupt()
             return
-        if os.getenv('LIVE_ONLY', '1') == '1' and self.live_missing():
-            self.log('Coordinator', 'blocked', 'Live workflow missing: ' + ', '.join(self.live_missing()))
+        missing = self.live_missing(require_band=source == 'band')
+        if os.getenv('LIVE_ONLY', '1') == '1' and missing:
+            self.log('Coordinator', 'blocked', 'Live workflow missing: ' + ', '.join(missing))
             return
         if source == 'band':
             addressed = re.match(r'^(?:hey\s+)?second\s*vision[\s,:]+(.+)$', text, re.I)
@@ -132,6 +135,14 @@ class Coordinator:
                 if version == self.plan_version:
                     self.log('Researcher · Recall', 'evidence', answer)
                     await self.say(answer)
+                return
+            if scene == 'bus_timing':
+                if not self.bus:
+                    await self.say('First tell me your starting address and destination so I can find the bus and its departure stop.')
+                    return
+                await self.say('Checking the latest Maps departure estimate.')
+                self.route_version += 1
+                self.spawn(self.transit(self.bus['origin'], self.bus['destination'], self.route_version))
                 return
             if scene == 'transit':
                 if not plan.get('origin') or not plan.get('destination'):
@@ -157,8 +168,8 @@ class Coordinator:
             if version == self.plan_version: await self.say('I could not complete that request. Check the provider status on the dashboard.')
 
     async def capture(self, epoch=None):
-        if os.getenv('LIVE_ONLY', '1') == '1' and self.live_missing():
-            self.log('Vision', 'blocked', 'Live capture missing: ' + ', '.join(self.live_missing()))
+        if os.getenv('LIVE_ONLY', '1') == '1' and self.live_missing(require_band=False):
+            self.log('Vision', 'blocked', 'Live capture missing: ' + ', '.join(self.live_missing(require_band=False)))
             return
         epoch = self.epoch if epoch is None else epoch
         req_id = str(uuid.uuid4())
@@ -171,15 +182,17 @@ class Coordinator:
 
     async def stream(self, epoch, duration):
         if epoch != self.epoch: return
-        if os.getenv('LIVE_ONLY', '1') == '1' and self.live_missing():
-            self.log('Vision', 'blocked', 'Live stream missing: ' + ', '.join(self.live_missing()))
+        if os.getenv('LIVE_ONLY', '1') == '1' and self.live_missing(require_band=False):
+            self.log('Vision', 'blocked', 'Live stream missing: ' + ', '.join(self.live_missing(require_band=False)))
             return
         socket = self.clients.get('glasses')
         if not socket: await self.say('Connect the glasses relay before starting a camera session.'); return
         self.streaming = True
-        await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})
+        if not await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1}):
+            self.streaming = False
+            return
         await self.send('band', {'type': 'led', 'color': '#00bb66'})
-        self.log('Vision', 'stream_started', f'{self.scene}: 1 fps requested, at most one model call at a time.')
+        self.log('Vision', 'stream_requested', f'{self.scene}: 1 fps requested, at most one model call at a time.')
         await self.acknowledge_view()
         async def expire():
             await asyncio.sleep(duration)
@@ -195,7 +208,7 @@ class Coordinator:
             if version != self.route_version: return
             self.bus = route
             self.log('Transit · Google Maps', 'route_ready', f"Line {route['line']}, stop {route['stop']}", departure=route['departure_time'])
-            await self.say(f"Google Maps lists line {route['line']} from {route['stop']}. This is a transit estimate; I will read the bus sign before identifying a match.")
+            await self.say(transit_speech(route))
             if route.get('departure_time'):
                 departure = datetime.fromisoformat(route['departure_time'].replace('Z', '+00:00')).timestamp()
                 delay = max(0, departure - time.time() - 60)

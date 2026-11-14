@@ -15,3 +15,5 @@ The first demo gate is a typed request through Pipecat that produces speech in t
 Deepgram is now configured privately on Tarang's local backend and verified with synthetic audio through the real Pipecat pipeline. The transcript triggered capture and Gemini label reading successfully. The handoff archive deliberately contains no keys; the deployment host needs its own private configuration.
 
 Live-only mode is now the default. The voice provider starts when a relay/request needs it, so an idle server does not open provider sessions before use. Google usage metadata and Pipecat speech usage are logged as evidence of real API work; console credit deductions remain unverified.
+
+For real glasses testing, typed dashboard requests no longer require a connected band. LIVE_ONLY=1 still requires the actual camera connection and provider keys, and disables silent system-voice fallback. Complete hands-free operation still needs the band. Gemini thinking is LOW; the backend refreshes Google Maps when asked about the next bus.

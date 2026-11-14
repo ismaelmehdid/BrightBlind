@@ -127,8 +127,22 @@ class ContractTests(unittest.TestCase):
             with TestClient(make_app(Fixtures())) as client:
                 response = client.post('/api/question', json={'text': 'read the label'})
                 self.assertEqual(response.status_code, 503)
-                self.assertIn('band relay', response.json()['detail'])
+                self.assertIn('glasses relay', response.json()['detail'])
                 self.assertIn('Meta camera connection', response.json()['detail'])
                 self.assertTrue(client.get('/api/state').json()['live_only'])
+
+    def test_typed_live_check_needs_real_glasses_but_not_a_fake_band(self):
+        from coordinator import Coordinator
+        with patch.dict(os.environ, {'DEEPGRAM_API_KEY': 'fixture', 'GEMINI_API_KEY': 'fixture'}):
+            coordinator = Coordinator(Fixtures())
+            try:
+                coordinator.clients['glasses'] = object()
+                coordinator.glasses_state = 'connected'
+                self.assertEqual(coordinator.live_missing(require_band=False), [])
+                self.assertIn('band relay', coordinator.live_missing())
+                coordinator.glasses_state = 'disconnected'
+                self.assertIn('Meta camera connection', coordinator.live_missing(require_band=False))
+            finally:
+                coordinator.db.close()
 
 if __name__ == '__main__': unittest.main()

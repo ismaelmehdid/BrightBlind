@@ -16,7 +16,7 @@ root = Path(__file__).parent
 if (root/'.env').exists() or (root/'access.txt').exists():
     raise SystemExit('Private configuration already exists; it was not overwritten.')
 settings = {'DOMAIN': args.domain, 'ADMIN_EMAIL': args.email, 'HOST': '0.0.0.0', 'PORT': '8765',
-            'GEMINI_MODEL': 'gemini-4-hydrogen', 'VOICE_TTS_PROVIDER': 'deepgram', 'DEEPGRAM_TTS_VOICE': 'flux-heather-en', 'LIVE_ONLY': '1'}
+            'GEMINI_MODEL': 'gemini-4-hydrogen', 'GEMINI_THINKING_LEVEL': 'LOW', 'VOICE_TTS_PROVIDER': 'deepgram', 'DEEPGRAM_TTS_VOICE': 'flux-heather-en', 'LIVE_ONLY': '1'}
 for key in ['DEEPGRAM_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_MAPS_API_KEY']:
     value = getpass.getpass(key + ': ').strip()
     if not value: raise SystemExit('Deepgram, Gemini and Maps keys are required for the full team workflow. Nothing was written.')

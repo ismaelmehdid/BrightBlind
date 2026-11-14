@@ -1,0 +1,33 @@
+{
+  "thinking_level": "LOW",
+  "model": "gemini-4-hydrogen",
+  "elapsed_ms": 1671,
+  "result": {
+    "intent": "bus_timing"
+  },
+  "usage": {
+    "model": "gemini-4-hydrogen",
+    "usage": {
+      "promptTokenCount": 245,
+      "candidatesTokenCount": 24,
+      "totalTokenCount": 365,
+      "promptTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 245
+        }
+      ],
+      "candidatesTokensDetails": [
+        {
+          "modality": "TEXT",
+          "tokenCount": 24
+        }
+      ],
+      "thoughtsTokenCount": 96,
+      "serviceTier": "standard"
+    },
+    "response_id": "NuL4apHhF4rJ-8YPja2x0QE",
+    "thinking_level": "LOW",
+    "credit_deduction_verified": false
+  }
+}
