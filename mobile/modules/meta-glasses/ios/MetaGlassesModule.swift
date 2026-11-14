@@ -16,18 +16,18 @@ public class MetaGlassesModule: Module {
 
     Events("onState", "onPhoto", "onFrame", "onButton", "onLog")
 
+    // The old app configured the SDK in App.init(); do the same as soon as the module exists, so a
+    // Meta AI callback that cold-launches the app never reaches an unconfigured SDK.
+    OnCreate {
+      Task { @MainActor in _ = self.ensureConfigured() }
+    }
+
     /// Wearables.configure() once, then start watching registration and devices.
     AsyncFunction("configure") { (promise: Promise) in
       Task { @MainActor in
-        if !MetaGlassesModule.configured {
-          do {
-            try Wearables.configure()
-            MetaGlassesModule.configured = true
-          } catch {
-            self.emitLog("Wearables.configure failed: \(error)")
-            promise.resolve(false)
-            return
-          }
+        guard self.ensureConfigured() else {
+          promise.resolve(false)
+          return
         }
         // The glasses session lives only while the app is on screen: never let the phone lock.
         UIApplication.shared.isIdleTimerDisabled = true
@@ -56,6 +56,10 @@ public class MetaGlassesModule: Module {
         guard let url = URL(string: urlString),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               components.queryItems?.contains(where: { $0.name == "metaWearablesAction" }) == true else {
+          promise.resolve(false)
+          return
+        }
+        guard self.ensureConfigured() else {
           promise.resolve(false)
           return
         }
@@ -140,9 +144,24 @@ public class MetaGlassesModule: Module {
 
   // MARK: - Wiring (AppModel.swift)
 
+  /// Wearables.configure() exactly once; false (and a log line) when it fails.
+  @MainActor
+  private func ensureConfigured() -> Bool {
+    if MetaGlassesModule.configured { return true }
+    do {
+      try Wearables.configure()
+      MetaGlassesModule.configured = true
+      return true
+    } catch {
+      emitLog("Wearables.configure failed: \(error)")
+      return false
+    }
+  }
+
   @MainActor
   private func controller() -> GlassesController {
     if let c = controllerStorage { return c }
+    _ = ensureConfigured()                   // never touch Wearables.shared before configure
     let c = GlassesController()
     controllerStorage = c
     speaker.log = { [weak c] s in Task { @MainActor in c?.log(s) } }
