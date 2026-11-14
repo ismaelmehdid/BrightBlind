@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 import httpx
 import websockets
+from obstacles import SCHEMA as OBSTACLE_SCHEMA, describe_obstacles
 
 
 class Providers:
@@ -43,6 +44,8 @@ class Providers:
 
     async def plan(self, text):
         # Explicit requests do not need a model round trip; novel phrasing still uses Gemini.
+        if re.search(r'\b(obstacles?|blocking|chairs?|hazards?)\b|\bin my way\b|\bclear path\b', text, re.I):
+            return {'scene':'scene', 'target':text, 'reply':'Describe visible potential obstacles; do not direct walking.', 'source':'explicit command'}
         if re.search(r'\bbus\b', text, re.I) and re.search(r'\b(when|timing|arrival|coming|next|how long|what time)\b', text, re.I):
             return {'scene': 'bus_timing', 'target': '', 'reply': 'Refresh the Maps departure estimate.', 'source': 'explicit command'}
         if re.search(r'\b(is this|which|read|check|see)\b.*\bbus\b|\bbus number\b', text, re.I):
@@ -96,16 +99,20 @@ class Providers:
         if scene == 'shelf': return await self.guide(image, target)
         result = await self.gemini(
             f'Describe this {scene} image for a blind wearer. Target: {json.dumps(target)}. '+
-            'Answer in one short sentence, at most 30 words, prioritizing the requested item. List only visible labels or items. If the target is not visible, say so. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For food or a shelf item, describe image-relative position (left/right/center, upper/lower) but never guide the hand. Identify visible stairs, curbs or obstructions. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return description, visible text/items, hazards, and uncertainty.',
+            'Answer in one short sentence, at most 30 words, prioritizing the requested item. List only visible labels or items. If the target is not visible, say so. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For food or a shelf item, describe image-relative position (left/right/center, upper/lower) but never guide the hand. Identify visible stairs, curbs or potential obstructions such as chairs, tables, bags, boxes, cables or other objects. Include at most two in obstacles, with camera-image position; do not infer they actually block a path or how far away they are. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return description, visible text/items, hazards, obstacles, and uncertainty.',
             {'type': 'OBJECT', 'required': ['description', 'visible', 'hazards', 'uncertain'], 'properties': {
                 'description': {'type': 'STRING'}, 'visible': {'type': 'ARRAY', 'items': {'type': 'STRING'}},
                 'hazards': {'type': 'ARRAY', 'items': {'type': 'STRING', 'enum': ['stairs', 'curb', 'obstruction', 'vehicle']}},
-                'uncertain': {'type': 'BOOLEAN'}}}, image)
+                'uncertain': {'type': 'BOOLEAN'}, 'obstacles': OBSTACLE_SCHEMA}}, image)
         if not isinstance(result.get('visible'), list) or not isinstance(result.get('hazards'), list):
             raise RuntimeError('Gemini returned incomplete visual evidence.')
         result['visible'] = [str(item)[:160] for item in result['visible'][:10]]
         result['hazards'] = [item for item in result['hazards'] if item in ['stairs', 'curb', 'obstruction', 'vehicle']]
-        if result['hazards']:
+        obstacle_description = describe_obstacles(result.get('obstacles', []))
+        if obstacle_description:
+            result['description'] = obstacle_description
+            if 'obstruction' not in result['hazards']: result['hazards'].append('obstruction')
+        elif result['hazards']:
             result['description'] = 'The latest image shows possible ' + ', '.join(result['hazards']) + '. Pause. I cannot determine the edge, step height or safe passage. Use your cane or assistance to check.'
         else:
             result['description'] = str(result.get('description', 'The view is unclear.'))[:600]
