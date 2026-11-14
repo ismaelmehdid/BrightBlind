@@ -80,12 +80,22 @@ async def connect_band(args):
             except OSError:                   # not initialized any more: WinRT will set MTA itself
                 break
             uninitialize_sta()
-    return await Band.connect(BAND, auto_reconnect=True)  # fails with "wrong-band" if another band answers
+    # Over Bluetooth the band can only be found for 60 s after a double-tap: keep trying for 2 minutes
+    # instead of giving up at once. Only our band's exact name is ever looked for (kit rule 3).
+    for attempt in range(40):
+        try:
+            return await Band.connect(BAND, auto_reconnect=True)  # fails with "wrong-band" if another band answers
+        except Exception as e:
+            if getattr(e, "code", "") not in ("not-found-nearby", "cancelled", "timeout") or attempt == 39:
+                raise
+            if attempt == 0:
+                print(f"Waiting for Vexo-HACK-{BAND:02d}: double-tap the band (its light blinks blue).")
+            await asyncio.sleep(3)
 
 
 async def main():
+    load_dotenv(ROOT / ".env")               # first: option defaults read BACKEND_WS_URL and RECALL_CLOUD_URL from it
     args = parse_args()
-    load_dotenv(ROOT / ".env")
 
     store = Store(args.db)
     brain, problem = make_brain()

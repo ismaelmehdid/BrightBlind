@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import os
+import shutil
 import time
 import aiohttp
 from dataclasses import dataclass
@@ -16,6 +17,25 @@ from pipecat.workers.runner import WorkerRunner
 @dataclass
 class TypedQuestion(TextFrame):
     pass
+
+
+def mp3_with_pyav(pcm, sample_rate):
+    """PCM s16le mono -> MP3 with PyAV (libmp3lame inside its wheel), for machines without the ffmpeg command,
+    such as a team laptop running this backend locally. Docker keeps using ffmpeg."""
+    import io
+    import av
+    import numpy as np
+    out = io.BytesIO()
+    container = av.open(out, 'w', format='mp3')
+    stream = container.add_stream('libmp3lame', rate=sample_rate)
+    stream.layout = 'mono'
+    samples = np.frombuffer(pcm[:len(pcm) - len(pcm) % 2], dtype='<i2').reshape(1, -1)
+    frame = av.AudioFrame.from_ndarray(samples, format='s16', layout='mono')
+    frame.sample_rate = sample_rate
+    for packet in stream.encode(frame): container.mux(packet)
+    for packet in stream.encode(None): container.mux(packet)
+    container.close()
+    return out.getvalue()
 
 
 class PlannerInput(FrameProcessor):
@@ -62,13 +82,17 @@ class GlassesOutput(FrameProcessor):
         elif isinstance(frame, TTSStoppedFrame) and self.audio:
             pcm = bytes(self.audio); self.audio.clear()
             try:
-                process = await asyncio.create_subprocess_exec('ffmpeg', '-loglevel', 'error', '-f', 's16le',
-                    '-ar', str(self.sample_rate), '-ac', '1', '-i', 'pipe:0', '-f', 'mp3', 'pipe:1',
-                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                try: audio, _ = await asyncio.wait_for(process.communicate(pcm), 5)
-                except TimeoutError:
-                    process.kill(); await process.wait(); raise
-                if process.returncode or not audio: raise RuntimeError('MP3 encoding failed')
+                if shutil.which('ffmpeg'):
+                    process = await asyncio.create_subprocess_exec('ffmpeg', '-loglevel', 'error', '-f', 's16le',
+                        '-ar', str(self.sample_rate), '-ac', '1', '-i', 'pipe:0', '-f', 'mp3', 'pipe:1',
+                        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    try: audio, _ = await asyncio.wait_for(process.communicate(pcm), 5)
+                    except TimeoutError:
+                        process.kill(); await process.wait(); raise
+                    if process.returncode: audio = b''
+                else:   # no ffmpeg command on this machine: same MP3 through PyAV
+                    audio = await asyncio.wait_for(asyncio.to_thread(mp3_with_pyav, pcm, self.sample_rate), 5)
+                if not audio: raise RuntimeError('MP3 encoding failed')
                 self.owner.muted_until = time.monotonic() + len(pcm)/(self.sample_rate*2) + .4
                 delivered = await self.owner.coordinator.send('glasses', {'type': 'say', 'audio_b64': base64.b64encode(audio).decode(), 'interrupt': True})
                 self.owner.coordinator.log(self.owner.tts_name + ' via Pipecat', 'audio_sent' if delivered else 'audio_undelivered', 'MP3 sent to glasses relay' if delivered else 'MP3 generated but relay delivery failed',

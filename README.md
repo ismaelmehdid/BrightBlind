@@ -94,6 +94,15 @@ Two hubs, one backend. The band talks only to the laptop. The glasses talk only 
   (a rate-limited Gemini) comes back as "my memory is busy", inside the backend's 25 s limit.
 - Fallback without Railway: `--tunnel` gives the laptop's Recall a public `https://….trycloudflare.com` address
   (needs `cloudflared`), guarded by `RECALL_TOKEN`; the address changes on every start.
+- **Everything on one laptop (local demo)**, the backend being the brain:
+  1. `.env` holds `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`, the relay tokens `BAND_RELAY_TOKEN`, `GLASSES_RELAY_TOKEN`,
+     `DASHBOARD_TOKENS` (24+ characters each) and `BACKEND_WS_URL=ws://127.0.0.1:8765/ws?token=<BAND_RELAY_TOKEN>`.
+  2. `backend\.venv\Scripts\python.exe run_backend_local.py`: the team backend on 127.0.0.1:8765, with the memory
+     and the shelf Guide, wake word on. Without the `ffmpeg` command it encodes the glasses' MP3 with PyAV.
+  3. `.venv\Scripts\python.exe app.py`: the band over Bluetooth (it waits up to 2 minutes for a double-tap), relayed
+     to the backend. `--usb --port COM5` for the cable.
+  4. `cloudflared tunnel --url http://127.0.0.1:8765`: the glasses connect to
+     `wss://<tunnel>/ws?token=<GLASSES_RELAY_TOKEN>`, and every answer and Guide direction plays in the glasses.
 - **Without the backend, Recall can drive the glasses itself** (`recall/glasses.py`): Andrii's app connects to
   `wss://…/glasses?token=…` (printed with `--tunnel`). Answers then play in the glasses, and a tap also takes a
   photo that Gemini describes into a memory.
