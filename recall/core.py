@@ -12,6 +12,7 @@ ASK_WINDOW = 20           # after a double-tap, the next sentence within this ma
 ASK_SETTLE = 1.5          # a sentence that ends this soon after the double-tap was begun before it: not the question
 ASK_MIN_WORDS = 3         # shorter sentences ("um", "okay so") do not use up the question
 BOOKMARK_SECONDS = 30     # a tap keeps the last 30 seconds of speech
+ANSWER_SECONDS = 20       # longest wait for Gemini's answer (the team backend gives up after 25 s)
 
 
 class Recall:
@@ -22,6 +23,7 @@ class Recall:
         self.clients = set()                  # open web pages (aiohttp WebSocketResponse)
         self.speak = None                     # async fn(text), set by the voice pipeline when it runs
         self.glasses = None                   # recall.glasses.Glasses: voice and camera when the phone is connected
+        self.mirror = None                    # recall.mirror.Mirror: copies lines and taps to the Recall on Railway
         # With the team backend connected, it owns the conversation (double-tap, speech in the glasses) and
         # asks Recall over /ws when a question is about memory. Recall then stays silent and only remembers.
         self.defer_to_backend = False
@@ -75,6 +77,8 @@ class Recall:
     async def on_tap(self, _e=None):
         """One tap: keep the last moments, even if they sound small."""
         n = self.store.bookmark_recent(BOOKMARK_SECONDS)
+        if self.mirror is not None:
+            self.mirror.bookmark(BOOKMARK_SECONDS)
         await self.broadcast("event", self.store.add_event("tap", f"bookmarked {n} line(s)"))
         await self.broadcast("bookmark", {"count": n})
         photo = self.glasses is not None and await self.glasses.capture("tap")
@@ -92,6 +96,8 @@ class Recall:
                 print("Photo description failed:", type(e).__name__, str(e)[:200])
                 text = "A photo was taken through the glasses."
         u = self.store.add_utterance(text, "glasses", self.ctx, bookmarked=True, photo=name)
+        if self.mirror is not None:
+            self.mirror.utterance(u)
         await self.broadcast("utterance", u)
         self._last_speech = 0
         await self.distill_now()
@@ -128,16 +134,38 @@ class Recall:
             await self.ask(text, source="voice")
             return
         u = self.store.add_utterance(text, source, self.ctx)
+        if self.mirror is not None:
+            self.mirror.utterance(u)
         await self.broadcast("utterance", u)
+
+    async def from_mirror(self, item):
+        """On the Railway side: a line or a tap copied from the laptop (recall/mirror.py)."""
+        if item.get("kind") == "bookmark":
+            n = self.store.bookmark_recent(float(item.get("seconds") or BOOKMARK_SECONDS))
+            await self.broadcast("event", self.store.add_event("tap", f"bookmarked {n} line(s) (from the laptop)"))
+            self._last_speech = 0
+            return True
+        text = str(item.get("text") or "").strip()[:4000]
+        if item.get("kind") != "utterance" or not text:
+            return False
+        ctx = {k: item.get(k) for k in ("activity", "steps", "cadence")}
+        u = self.store.add_utterance(text, str(item.get("source") or "band")[:20], ctx,
+                                     bookmarked=bool(item.get("bookmarked")), ts=item.get("ts"))
+        self._last_speech = time.time()
+        await self.broadcast("utterance", u)
+        return True
 
     async def ask(self, question, source="typed"):
         if not self.brain:
             answer = "I can't think yet: " + (self.brain_problem or "Gemini is off") + "."
         else:
             try:
-                answer = await asyncio.to_thread(
+                # The team backend gives up after 25 s; a rate-limited Gemini (429) can retry for minutes.
+                answer = await asyncio.wait_for(asyncio.to_thread(
                     self.brain.answer, question, self.store.memories(),
-                    self.store.utterances(limit=150), self.store.events(limit=150))
+                    self.store.utterances(limit=150), self.store.events(limit=150)), ANSWER_SECONDS)
+            except asyncio.TimeoutError:
+                answer = "My memory is busy right now. Please ask again in a minute."
             except Exception as e:
                 answer = f"Gemini failed ({type(e).__name__})."
         row = self.store.add_answer(question, answer, source)

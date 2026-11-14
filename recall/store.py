@@ -74,11 +74,16 @@ class Store:
 
     # --- writing ---------------------------------------------------------------------------
 
-    def add_utterance(self, text, source, ctx, bookmarked=False, photo=None):
+    def add_utterance(self, text, source, ctx, bookmarked=False, photo=None, ts=None):
+        """ts: when it was said (a mirrored line keeps the laptop's time); now when left out."""
+        try:
+            ts = float(ts) if ts is not None else time.time()
+        except (TypeError, ValueError):
+            ts = time.time()
         cur = self._run(
             "INSERT INTO utterances (ts, text, source, activity, steps, cadence, bookmarked, photo)"
             " VALUES (?,?,?,?,?,?,?,?)",
-            (time.time(), text, source, ctx.get("activity"), ctx.get("steps"), ctx.get("cadence"),
+            (ts, text, source, ctx.get("activity"), ctx.get("steps"), ctx.get("cadence"),
              int(bookmarked), photo),
         )
         return self.utterance(cur.lastrowid)

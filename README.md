@@ -84,11 +84,16 @@ Two hubs, one backend. The band talks only to the laptop. The glasses talk only 
   (kit rule 4), and the microphone is on whenever audio is forwarded.
   With a backend connected, Recall stays silent and leaves double-tap to the backend (one voice, in the glasses);
   it keeps transcribing, storing and bookmarking (tap). `--sim --backend ...` tests it with no band.
-- **The backend asks Recall** when its planner picks `memory`: set `RECALL_WS_URL` to Recall's `/ws`. A backend on
-  another machine cannot reach `localhost`, so run Recall with `--tunnel`: it prints a public
-  `https://….trycloudflare.com` address (needs `cloudflared`: `winget install --id Cloudflare.cloudflared`) and
-  protects every path with `RECALL_TOKEN` (from `.env`, or a fresh one printed at start). Then
-  `RECALL_WS_URL=wss://….trycloudflare.com/ws` and `RECALL_TOKEN=<same token>` in the backend's `.env`.
+- **The backend asks the Recall on Railway** when its planner picks `memory`. Only the laptop hears the band, so
+  the laptop copies its memory there as it goes (`recall/mirror.py`): every stored line with what the body was
+  doing, and every tap. Set `RECALL_CLOUD_URL=https://<service>.up.railway.app` and `RECALL_CLOUD_TOKEN=<the
+  Railway service's RECALL_TOKEN>` in the laptop's `.env` (add `--mirror-backfill` once to send what is already
+  there). Lines wait while Railway is unreachable. In the backend's `.env`:
+  `RECALL_WS_URL=wss://<service>.up.railway.app/ws` and `RECALL_TOKEN=<the same Railway token>`. The Railway
+  Recall needs its own `GEMINI_API_KEY` to distill and answer (`DEPLOY.md`). An answer that takes more than 20 s
+  (a rate-limited Gemini) comes back as "my memory is busy", inside the backend's 25 s limit.
+- Fallback without Railway: `--tunnel` gives the laptop's Recall a public `https://….trycloudflare.com` address
+  (needs `cloudflared`), guarded by `RECALL_TOKEN`; the address changes on every start.
 - **Without the backend, Recall can drive the glasses itself** (`recall/glasses.py`): Andrii's app connects to
   `wss://…/glasses?token=…` (printed with `--tunnel`). Answers then play in the glasses, and a tap also takes a
   photo that Gemini describes into a memory.

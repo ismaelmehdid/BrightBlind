@@ -48,6 +48,10 @@ def parse_args():
                    help="send the band's raw Opus to the backend instead of decoded PCM (the backend prefers PCM)")
     p.add_argument("--tunnel", action="store_true",
                    help="public https address (Cloudflare quick tunnel) so the glasses' phone can connect")
+    p.add_argument("--mirror", default=os.getenv("RECALL_CLOUD_URL"),
+                   help="copy the memory to the Recall on Railway, e.g. https://<service>.up.railway.app")
+    p.add_argument("--mirror-backfill", action="store_true",
+                   help="also send every line already in the laptop's memory (once, when Railway starts empty)")
     return p.parse_args()
 
 
@@ -132,6 +136,20 @@ async def main():
     tasks = [asyncio.create_task(recall.distill_loop())]
     if voice:
         tasks.append(asyncio.create_task(voice.run()))
+
+    if args.mirror:
+        from recall.mirror import Mirror
+
+        cloud_token = os.getenv("RECALL_CLOUD_TOKEN") or os.getenv("RECALL_TOKEN") or ""
+        if not cloud_token:
+            print("Mirror off: set RECALL_CLOUD_TOKEN in .env (the Railway service's RECALL_TOKEN).")
+        else:
+            recall.mirror = Mirror(args.mirror, cloud_token)
+            if args.mirror_backfill:
+                recall.mirror.backfill(store.utterances(limit=100000))
+                print(f"Mirror: sending {len(recall.mirror.queue)} line(s) already in memory")
+            tasks.append(asyncio.create_task(recall.mirror.run()))
+            print("Mirror: the memory is copied to", recall.mirror.base)
 
     relay = None
     if args.backend:

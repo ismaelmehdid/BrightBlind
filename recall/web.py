@@ -3,6 +3,7 @@
 Binds to 127.0.0.1 only: the transcript of the wearer's day must not be readable by the whole event Wi-Fi.
 When a tunnel makes it public (for the glasses' phone), a token guards every path.
 """
+import asyncio
 import hmac
 import json
 from pathlib import Path
@@ -42,6 +43,7 @@ def make_app(recall, band_actions, glasses=None, token=None):
     async def ws_handler(req):
         ws = web.WebSocketResponse(heartbeat=20)
         await ws.prepare(req)
+        pending = set()                      # commands running in the background, kept so they are not collected
         recall.clients.add(ws)
         await ws.send_str(json.dumps({"type": "snapshot", "data": recall.snapshot()}))
         try:
@@ -55,7 +57,11 @@ def make_app(recall, band_actions, glasses=None, token=None):
                 if cmd.get("cmd") == "refresh":
                     await ws.send_str(json.dumps({"type": "snapshot", "data": recall.snapshot()}))
                 else:
-                    await handle(cmd)
+                    # In the background: a Gemini answer can take seconds, and while this loop waits it
+                    # does not answer the client's keep-alive pings (the backend's socket then drops).
+                    task = asyncio.create_task(handle(cmd))
+                    pending.add(task)
+                    task.add_done_callback(pending.discard)
         finally:
             recall.clients.discard(ws)
         return ws
@@ -112,6 +118,13 @@ def make_app(recall, band_actions, glasses=None, token=None):
         await recall.on_transcript(text, source="backend")
         return web.json_response({"ok": True})
 
+    async def api_mirror(req):
+        """Lines and taps copied from the laptop's Recall (recall/mirror.py) into this one (Railway)."""
+        if await recall.from_mirror(await body(req)):
+            return web.json_response({"ok": True})
+        return web.json_response({"error": "not a line or a tap"}, status=400)
+
+    app.router.add_post("/api/mirror", api_mirror)
     app.router.add_get("/api/context", api_context)
     app.router.add_get("/api/memories", api_memories)
     app.router.add_get("/api/heard", api_heard)
