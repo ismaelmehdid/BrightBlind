@@ -1,0 +1,44 @@
+{
+  "phrase": "This is a speech latency check for the wearable assistant. The next message will come from the live camera after the view is available.",
+  "scope": "Pipecat output timing; no camera, relay, or speaker playback",
+  "flux_websocket": [
+    {
+      "first_audio_ms": 282,
+      "last_audio_ms": 8426,
+      "complete_ms": 8426,
+      "audio_seconds": 11.04
+    },
+    {
+      "first_audio_ms": 82,
+      "last_audio_ms": 6633,
+      "complete_ms": 6636,
+      "audio_seconds": 8.88
+    },
+    {
+      "first_audio_ms": 112,
+      "last_audio_ms": 6520,
+      "complete_ms": 6520,
+      "audio_seconds": 8.72
+    }
+  ],
+  "aura_http": [
+    {
+      "first_audio_ms": 391,
+      "last_audio_ms": 2493,
+      "complete_ms": 2493,
+      "audio_seconds": 7.8
+    },
+    {
+      "first_audio_ms": 132,
+      "last_audio_ms": 2094,
+      "complete_ms": 2094,
+      "audio_seconds": 7.2
+    },
+    {
+      "first_audio_ms": 139,
+      "last_audio_ms": 1955,
+      "complete_ms": 1955,
+      "audio_seconds": 6.64
+    }
+  ]
+}

@@ -31,7 +31,7 @@ Vexo relay: PCM or Opus, events, activity
        ├─ Gemini: interpret a request / analyze a selected image
        ├─ Google Maps: bus line, departure stop and departure estimate
        └─ Recall: query personal memory over its separate /ws
-  → Pipecat → Deepgram Flux TTS → MP3
+  → Pipecat → Deepgram Aura HTTP TTS → MP3
   → /ws say → iPhone → glasses audio route
 ~~~
 
@@ -76,7 +76,7 @@ Required for the full loop:
 
 | Variable | Actual use |
 |---|---|
-| DEEPGRAM_API_KEY | Flux STT and Flux TTS inside Pipecat, mip_opt_out enabled |
+| DEEPGRAM_API_KEY | Flux STT and Aura HTTP TTS inside Pipecat, mip_opt_out enabled |
 | ELEVENLABS_API_KEY | Optional alternative: set VOICE_TTS_PROVIDER=elevenlabs for its sponsor track |
 | GEMINI_API_KEY | Gemini planner and visual observations |
 | GOOGLE_MAPS_API_KEY | Routes API transit planning |
@@ -143,3 +143,5 @@ Maps setup completed on November 14 using the event account. The Routes API is e
 Gemini planner and vision calls now explicitly use GEMINI_THINKING_LEVEL=LOW. Common bus/food requests route directly; other requests use Gemini at the selected level. Bus timing requests refresh the saved route through Google Maps and speak minutes until its returned departure estimate. Expired estimates are not described as the next bus. Camera requests receive a short spoken acknowledgement while analysis runs.
 
 Approved Railway camera test: acknowledgement audio was sent in about 0.95 seconds, the Gemini observation arrived at 5.8 seconds, and the answer audio was sent at 10.8 seconds. Gemini analysis itself took about 2.2 seconds; capture/transfer and collecting a complete TTS utterance before MP3 relay account for the rest. This is one observed round trip, not a latency guarantee. See railway-camera-verification.json; it excludes the image and caption. Further speech-latency work needs to address whole-utterance audio buffering.
+
+Latency update: speech output now defaults to DEEPGRAM_TTS_ENGINE=aura_http with aura-2-thalia-en. In a live 3-call-per-service diagnostic, median completed-clip time was 2.1 s for Aura HTTP versus 6.6 s for Flux WebSocket. Both ran through Pipecat with the same text and Deepgram key. This comparison excludes camera, Gemini, encoding and physical playback. Flux remains selectable with DEEPGRAM_TTS_ENGINE=flux. Existing live camera streams are reused for follow-up visual requests instead of toggling the camera off and on. A new real-camera round-trip measurement is still required.

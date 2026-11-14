@@ -153,7 +153,7 @@ class Coordinator:
             if scene not in ('fridge', 'label', 'bus', 'shelf', 'scene'): raise RuntimeError('Planner returned an unsupported action.')
             self.epoch += 1
             self.pending.clear()
-            if self.streaming:
+            if self.streaming and scene in ('fridge', 'label'):
                 await self.send('glasses', {'type': 'stream', 'on': False, 'fps': 1})
                 self.streaming = False
             self.scene, self.target = scene, str(plan.get('target', ''))[:250]
@@ -187,12 +187,13 @@ class Coordinator:
             return
         socket = self.clients.get('glasses')
         if not socket: await self.say('Connect the glasses relay before starting a camera session.'); return
+        reuse = self.streaming and self.glasses_state == 'streaming'
         self.streaming = True
-        if not await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1}):
+        if not reuse and not await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1}):
             self.streaming = False
             return
         await self.send('band', {'type': 'led', 'color': '#00bb66'})
-        self.log('Vision', 'stream_requested', f'{self.scene}: 1 fps requested, at most one model call at a time.')
+        self.log('Vision', 'stream_reused' if reuse else 'stream_requested', f'{self.scene}: 1 fps requested, at most one model call at a time.')
         await self.acknowledge_view()
         async def expire():
             await asyncio.sleep(duration)

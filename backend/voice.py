@@ -3,6 +3,7 @@ import asyncio
 import base64
 import os
 import time
+import aiohttp
 from dataclasses import dataclass
 from pipecat.frames.frames import (InputAudioRawFrame, TranscriptionFrame, InterimTranscriptionFrame,
     TTSSpeakFrame, OutputAudioRawFrame, TTSStartedFrame, TTSStoppedFrame, InterruptionFrame, ErrorFrame, TextFrame, MetricsFrame)
@@ -95,12 +96,24 @@ class Voice:
         provider = os.getenv('VOICE_TTS_PROVIDER', 'deepgram')
         if provider not in ('deepgram', 'elevenlabs'):
             raise RuntimeError('VOICE_TTS_PROVIDER must be deepgram or elevenlabs.')
-        self.tts_name = 'Deepgram Flux TTS' if provider == 'deepgram' else 'ElevenLabs'
+        self.tts_session = None
+        engine = os.getenv('DEEPGRAM_TTS_ENGINE', 'aura_http')
+        if engine not in ('aura_http', 'flux'):
+            raise RuntimeError('DEEPGRAM_TTS_ENGINE must be aura_http or flux.')
+        self.tts_name = ('Deepgram Aura HTTP' if engine == 'aura_http' else 'Deepgram Flux TTS') if provider == 'deepgram' else 'ElevenLabs'
         if provider == 'deepgram' and os.getenv('DEEPGRAM_API_KEY'):
-            from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
-            processors.append(DeepgramFluxTTSService(api_key=os.environ['DEEPGRAM_API_KEY'],
-                mip_opt_out=True, settings=DeepgramFluxTTSService.Settings(
-                    voice=os.getenv('DEEPGRAM_TTS_VOICE', 'flux-heather-en'))))
+            if engine == 'aura_http':
+                from pipecat.services.deepgram.tts import DeepgramHttpTTSService
+                self.tts_session = aiohttp.ClientSession()
+                processors.append(DeepgramHttpTTSService(api_key=os.environ['DEEPGRAM_API_KEY'],
+                    mip_opt_out=True, aiohttp_session=self.tts_session,
+                    settings=DeepgramHttpTTSService.Settings(
+                        voice=os.getenv('DEEPGRAM_AURA_VOICE', 'aura-2-thalia-en'))))
+            else:
+                from pipecat.services.deepgram.flux.tts import DeepgramFluxTTSService
+                processors.append(DeepgramFluxTTSService(api_key=os.environ['DEEPGRAM_API_KEY'],
+                    mip_opt_out=True, settings=DeepgramFluxTTSService.Settings(
+                        voice=os.getenv('DEEPGRAM_TTS_VOICE', 'flux-heather-en'))))
         elif provider == 'elevenlabs' and os.getenv('ELEVENLABS_API_KEY'):
             from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
             processors.append(ElevenLabsTTSService(api_key=os.environ['ELEVENLABS_API_KEY'],
@@ -120,9 +133,11 @@ class Voice:
             self.running = asyncio.create_task(self.runner.run())
 
     async def close(self):
-        if not self.running: return
-        await self.runner.cancel()
-        if self.running: await self.running
+        if self.running:
+            await self.runner.cancel()
+            await self.running
+        if self.tts_session:
+            await self.tts_session.close()
 
     async def question(self, text):
         await self.start()

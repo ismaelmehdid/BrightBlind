@@ -19,3 +19,5 @@ Live-only mode is now the default. The voice provider starts when a relay/reques
 For real glasses testing, typed dashboard requests no longer require a connected band. LIVE_ONLY=1 still requires the actual camera connection and provider keys, and disables silent system-voice fallback. Complete hands-free operation still needs the band. Gemini thinking is LOW; the backend refreshes Google Maps when asked about the next bus.
 
 Railway coordinator: https://backend-production-902365d4.up.railway.app (service backend). All three provider keys are set privately. LOW thinking and LIVE_ONLY=1 are active. The glasses relay has completed one approved real-photo → Gemini → Deepgram audio round trip. The band relay is still missing. Retrieve role tokens from the Railway backend Variables; do not commit or post them. The separate Recall service is currently not configured in the coordinator.
+
+Latency work stays inside backend/: Deepgram Aura HTTP now produces complete speech clips faster than Flux WebSocket for the existing whole-MP3 relay contract. Recognition remains Flux. No device protocol change is needed. Follow-up visual requests reuse an already streaming camera.

@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -39,5 +40,28 @@ class ProviderConfigurationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await provider.plan('When is the next bus coming?'))['scene'], 'bus_timing')
             self.assertEqual((await provider.plan('Where is the food in this room?'))['scene'], 'shelf')
         finally: await provider.close()
+
+    async def test_existing_live_stream_is_not_restarted_for_followup(self):
+        from coordinator import Coordinator
+        class Socket:
+            def __init__(self): self.messages=[]
+            async def send_json(self, message): self.messages.append(message)
+        class Voice:
+            async def say(self, text): pass
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'BACKEND_DATA_DIR':directory, 'LIVE_ONLY':'0'}):
+            provider = Providers()
+            coordinator = Coordinator(provider)
+            socket = Socket()
+            coordinator.clients['glasses'] = socket
+            coordinator.voice = Voice()
+            coordinator.glasses_state = 'streaming'
+            coordinator.streaming = True
+            try:
+                await coordinator.stream(coordinator.epoch, 30)
+                self.assertFalse(any(message['type']=='stream' for message in socket.messages))
+                self.assertTrue(coordinator.streaming)
+            finally:
+                await coordinator.close()
+                await provider.close()
 
 if __name__ == '__main__': unittest.main()
