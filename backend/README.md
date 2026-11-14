@@ -84,6 +84,19 @@ Required for the full loop:
 
 The Google Maps project must have Routes API enabled and a billing/credit arrangement that permits it. A Gemini key alone does not prove Maps access.
 
+For the issued event account, run gcloud auth login devstar7088@gcplab.me. If Chrome selects a personal account, use --no-launch-browser and open the printed link in Incognito, then paste the returned code into Terminal. A browser success page alone is insufficient if Terminal reports an account mismatch.
+
+After the event account is authenticated:
+
+~~~sh
+.venv/bin/python setup_maps.py --check-only
+.venv/bin/python setup_maps.py
+~~~
+
+The helper identifies the VexoHacks-7088 project, requires existing project billing, enables Routes and the API Keys service, creates or reuses a Routes-only key, tests a real transit request between two public San Francisco landmarks, and saves the key privately in .env. It never attaches a billing account. API enablement and key restrictions can take time to propagate. Restart the backend after success. This verifies live access, not the sponsor credit balance.
+
+Reference: [Google Routes setup](https://developers.google.com/maps/documentation/routes/get-api-key).
+
 LIVE_ONLY=1 is the default. Requests are blocked when the band relay, glasses relay, Meta camera connection or essential provider keys are missing. Server speech does not silently fall back to system voice. Isolated engineering tests set LIVE_ONLY=0; they do not constitute a hardware demo. Relay state is not hardware attestation: the actual devices still need an observed end-to-end check.
 
 ## Deploy as a team server
