@@ -17,6 +17,13 @@ final class AppModel: ObservableObject {
 
         glasses.onPhoto = { [weak self] jpeg, source, reqId in
             guard let self else { return }
+            // The standalone shutter returns HEIC; the contract (and the backend) want JPEG.
+            var jpeg = jpeg
+            if !(jpeg.count > 2 && jpeg[jpeg.startIndex] == 0xFF && jpeg[jpeg.startIndex + 1] == 0xD8),
+               let converted = UIImage(data: jpeg)?.jpegData(compressionQuality: 0.85) {
+                self.glasses.log("photo converted HEIC → JPEG, \(converted.count / 1024) KB")
+                jpeg = converted
+            }
             let image = UIImage(data: jpeg)
             self.lastPhoto = image
             self.lastPhotoInfo = "\(source) \(jpeg.count / 1024) KB \(image.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "")"
