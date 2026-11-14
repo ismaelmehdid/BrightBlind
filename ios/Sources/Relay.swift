@@ -25,9 +25,30 @@ final class Relay: ObservableObject {
         url = UserDefaults.standard.string(forKey: "relayURL") ?? "ws://192.168.0.10:8765/ws"
     }
 
+    /// The backend address also lives in the repo (ios/backend-url.txt on main), so it can be changed
+    /// with a push instead of typing on the phone. A non-empty file wins over the text field.
+    private static let remoteConfig = "https://raw.githubusercontent.com/ismaelmehdid/SecondVision/main/ios/backend-url.txt"
+
     func connect() {
         wanted = true
-        open()
+        Task { @MainActor in
+            if let remote = await Self.fetchRemoteURL(), remote != self.url {
+                self.log?("backend url from repo: \(remote)")
+                self.url = remote
+            }
+            self.open()
+        }
+    }
+
+    private static func fetchRemoteURL() async -> String? {
+        guard let u = URL(string: remoteConfig + "?t=\(Int(Date().timeIntervalSince1970))") else { return nil }
+        var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 5)
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return line.hasPrefix("ws") ? line : nil
     }
 
     func disconnect() {
@@ -40,11 +61,13 @@ final class Relay: ObservableObject {
 
     private func open() {
         guard wanted, task == nil else { return }
-        guard let u = URL(string: url.trimmingCharacters(in: .whitespaces)) else {
+        guard let u = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             state = "bad url"
+            log?("ws: bad url '\(url)'")
             return
         }
         state = "connecting"
+        log?("ws connecting to \(u.absoluteString)"
         let t = session.webSocketTask(with: u)
         task = t
         t.resume()
