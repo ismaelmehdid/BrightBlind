@@ -28,6 +28,13 @@ class Fixtures:
 def message(message_type, **fields):
     return {'type': message_type, 'ts': round(time.time()*1000), **fields}
 
+def receive_after_ack(socket):
+    for _ in range(6):
+        message = socket.receive_json()
+        if message.get('text') != 'Looking now.':
+            return message
+    raise AssertionError('Expected a result after the acknowledgement')
+
 class ContractTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -62,13 +69,13 @@ class ContractTests(unittest.TestCase):
                 time.sleep(.05)
                 self.assertIsNone(client.get('/api/state').json()['image'])
                 glasses.send_json(message('photo', jpeg_b64=jpeg, w=10, h=10, source='capture', req_id=capture['req_id']))
-                self.assertIn('milk', glasses.receive_json()['text'])
+                self.assertIn('milk', receive_after_ack(glasses)['text'])
                 client.post('/api/question', json={'text': 'shelf'})
                 stream = glasses.receive_json()
                 self.assertEqual((stream['type'], stream['on'], stream['fps']), ('stream', True, 1))
                 client.post('/api/stop', json={})
-                self.assertFalse(glasses.receive_json()['on'])
-                self.assertEqual(glasses.receive_json()['type'], 'stop_speaking')
+                self.assertFalse(receive_after_ack(glasses)['on'])
+                self.assertEqual(receive_after_ack(glasses)['type'], 'stop_speaking')
                 self.assertFalse(client.get('/api/state').json()['streaming'])
 
     def test_band_gesture_and_reconnect(self):

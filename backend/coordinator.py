@@ -84,6 +84,10 @@ class Coordinator:
         self.log('Coordinator', 'reply', text)
         await self.voice.say(text)
 
+    async def acknowledge_view(self):
+        self.log('Coordinator', 'acknowledgement', 'Camera request sent; visual analysis is pending.')
+        await self.voice.say('Looking now.')
+
     async def stop(self):
         self.epoch += 1
         self.plan_version += 1
@@ -142,6 +146,8 @@ class Coordinator:
                 await self.send('glasses', {'type': 'stream', 'on': False, 'fps': 1})
                 self.streaming = False
             self.scene, self.target = scene, str(plan.get('target', ''))[:250]
+            if scene == 'bus' and self.bus:
+                self.target = self.bus['line'] + ' toward ' + self.bus.get('headsign', '')
             if scene in ('fridge', 'label'):
                 await self.capture(self.epoch)
             else:
@@ -161,6 +167,7 @@ class Coordinator:
             self.pending.clear(); await self.say('The glasses relay is disconnected.'); return
         await self.send('band', {'type': 'led', 'color': '#00bb66'})
         self.log('Vision', 'capture_requested', self.scene, req_id=req_id)
+        await self.acknowledge_view()
 
     async def stream(self, epoch, duration):
         if epoch != self.epoch: return
@@ -173,6 +180,7 @@ class Coordinator:
         await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})
         await self.send('band', {'type': 'led', 'color': '#00bb66'})
         self.log('Vision', 'stream_started', f'{self.scene}: 1 fps requested, at most one model call at a time.')
+        await self.acknowledge_view()
         async def expire():
             await asyncio.sleep(duration)
             if epoch == self.epoch and self.streaming:

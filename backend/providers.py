@@ -39,6 +39,12 @@ class Providers:
 
     async def plan(self, text):
         # Explicit requests do not need a model round trip; novel phrasing still uses Gemini.
+        if re.search(r'\b(is this|which|read|check|see)\b.*\bbus\b|\bbus number\b', text, re.I):
+            return {'scene': 'bus', 'target': text, 'reply': 'Read the current bus display.', 'source': 'explicit command'}
+        if re.search(r'\b(where|find|see|locate)\b.*\b(food|snack|drink|chocolate|bread|milk|water)\b', text, re.I):
+            return {'scene': 'shelf', 'target': text, 'reply': 'Locate the requested item in the current image.', 'source': 'explicit command'}
+        if re.search(r'\b(what is|what.s)\b.*\b(in front|around me)\b|\bdescribe (?:the |my )?(room|surroundings)\b', text, re.I):
+            return {'scene': 'scene', 'target': text, 'reply': 'Describe the current view.', 'source': 'explicit command'}
         if re.search(r'\b(read|scan|check)\b.*\b(label|price|document|sign)\b', text, re.I):
             return {'scene': 'label', 'target': text, 'reply': 'Read the requested text in one image.', 'source': 'explicit command'}
         route = re.fullmatch(r'(?:plan (?:a )?)?route from (.+?) to (.+)', text.strip(), re.I)
@@ -54,7 +60,7 @@ class Providers:
     async def vision(self, scene, image, target):
         result = await self.gemini(
             f'Describe this {scene} image for a blind wearer. Target: {json.dumps(target)}. '+
-            'List only visible labels or items. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For a shelf, describe image-relative product position but never guide the hand. Identify visible stairs, curbs or obstructions. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return a brief description, visible text/items, hazards, and uncertainty.',
+            'Answer in one short sentence, at most 30 words, prioritizing the requested item. List only visible labels or items. If the target is not visible, say so. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For food or a shelf item, describe image-relative position (left/right/center, upper/lower) but never guide the hand. Identify visible stairs, curbs or obstructions. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return description, visible text/items, hazards, and uncertainty.',
             {'type': 'OBJECT', 'required': ['description', 'visible', 'hazards', 'uncertain'], 'properties': {
                 'description': {'type': 'STRING'}, 'visible': {'type': 'ARRAY', 'items': {'type': 'STRING'}},
                 'hazards': {'type': 'ARRAY', 'items': {'type': 'STRING', 'enum': ['stairs', 'curb', 'obstruction', 'vehicle']}},
