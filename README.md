@@ -1,4 +1,4 @@
-# SecondVision
+# BrightBlind
 
 Eyes for people who cannot see, built from two wearables that each do half the job.
 
@@ -182,7 +182,7 @@ Stay in your folder. The only shared file is the contract table above (mirrored 
 
 Six stages, adapted from Andrii's hackathon pipeline (Notion: "Universal pipeline for hackathon"). Stages 1–3 are done and live in this file; 4–6 are what the rest of the day looks like.
 
-1. **Idea.** Done: SecondVision, three demo scenes above. Everything is built backwards from the 2-minute demo. If a feature is not in a scene, it does not get built.
+1. **Idea.** Done: BrightBlind, three demo scenes above. Everything is built backwards from the 2-minute demo. If a feature is not in a scene, it does not get built.
 2. **Explain it to the agent.** Done: this README is the explanation. Every new agent session starts by reading it; if the agent's summary of the project does not match yours, fix the README, not the agent.
 3. **Architecture.** Done: two hubs, one backend, one WebSocket contract. `README.md` plays the role of `PLAN.md`. A feature that needs a new message type goes through the contract table and the board first.
 4. **Ready-made components.** Nobody styles buttons today. The judges' dashboard (`backend/`) is shadcn/ui for the base, Magic UI or Aceternity for the first screen. Band code comes from `vexo-open-kit` examples. The glasses session is copied from Andrii's public scaffold.
@@ -196,7 +196,7 @@ Two habits from the pipeline that pay off most here: walk up to the judges and s
 
 ## Team board
 
-One pinned issue is the board: https://github.com/ismaelmehdid/SecondVision/issues/2. Post before you touch another folder or the contract table; address with `@ios`, `@backend`, `@band`.
+One pinned issue is the board: https://github.com/ismaelmehdid/BrightBlind/issues/2. Post before you touch another folder or the contract table; address with `@ios`, `@backend`, `@band`.
 
     tools/board post "@backend contract: photo now carries req_id"
     tools/board unread        # new posts since you last read
