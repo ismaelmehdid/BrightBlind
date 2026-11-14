@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-14",
+  "tested": "typed request \u2192 real Pipecat \u2192 real Gemini planner \u2192 simulated glasses \u2192 real Gemini vision \u2192 text say fallback",
+  "total_ms": 19453,
+  "agents": [
+    "Voice",
+    "Coordinator",
+    "Vision \u00b7 Gemini",
+    "Vision",
+    "Planner \u00b7 Gemini",
+    "Dashboard",
+    "Transport"
+  ],
+  "deepgram_live_verified": true,
+  "elevenlabs_live_verified": false,
+  "real_glasses_verified": false,
+  "explicit_label_followup": {
+    "capture_request_ms": 34,
+    "complete_ms": 3111,
+    "price_read_correctly": true,
+    "routing": "local explicit command; real Gemini vision; real Pipecat; simulated relay; system voice fallback"
+  },
+  "deepgram_live_check": {
+    "model": "flux-general-en",
+    "framework": "Pipecat 1.16.0",
+    "input": "Synthetic speech streamed through simulated band in 20 ms PCM packets",
+    "transcript": "Read the name and price on this chocolate label.",
+    "speech_end_to_capture_ms": 2010,
+    "complete_path": "band WebSocket \u2192 Pipecat \u2192 real Deepgram Flux \u2192 planner \u2192 simulated glasses \u2192 real Gemini \u2192 text say fallback",
+    "physical_band_verified": false,
+    "physical_glasses_verified": false
+  },
+  "deepgram_tts_live_verified": true,
+  "deepgram_full_audio_check": {
+    "stt": "flux-general-en",
+    "tts": "flux-heather-en",
+    "framework": "Pipecat 1.16.0",
+    "path": "synthetic band PCM \u2192 real Deepgram STT \u2192 capture command \u2192 simulated glasses image \u2192 real Gemini \u2192 real Deepgram TTS \u2192 MP3 say message",
+    "reply_transcript": "The label is for North Coast 70% dark chocolate priced at $3.49 for 100 grams.",
+    "mp3_bytes": 32301,
+    "physical_devices_verified": false
+  }
+}

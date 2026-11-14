@@ -1,0 +1,46 @@
+name: secondvision-backend
+services:
+  backend:
+    build: .
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8765"
+      BACKEND_DATA_DIR: /data
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes: [backend_data:/data]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=2)"]
+      interval: 20s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+  gateway:
+    image: caddy:2.10.2-alpine
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?Set the team domain in .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set the certificate contact in .env}
+    ports: ["80:80", "443:443"]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  backend_data:
+  caddy_data:
+  caddy_config:

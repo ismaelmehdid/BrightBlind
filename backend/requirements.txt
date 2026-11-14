@@ -1,0 +1,6 @@
+pipecat-ai[deepgram,elevenlabs,websocket]==1.16.0
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+httpx>=0.28,<1
+python-dotenv>=1,<2
+av>=14,<18

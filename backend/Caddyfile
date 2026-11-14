@@ -1,0 +1,10 @@
+{
+    email {$ADMIN_EMAIL}
+    admin off
+}
+{$DOMAIN} {
+    request_body {
+        max_size 6MB
+    }
+    reverse_proxy backend:8765
+}
