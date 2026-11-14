@@ -39,5 +39,8 @@
     "reply_transcript": "The label is for North Coast 70% dark chocolate priced at $3.49 for 100 grams.",
     "mp3_bytes": 32301,
     "physical_devices_verified": false
-  }
+  },
+  "google_maps_live_verified": true,
+  "google_maps_project": "vexohacks26sfo-7088",
+  "maps_evidence": "maps-verification.json"
 }

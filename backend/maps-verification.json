@@ -1,0 +1,21 @@
+{
+  "project": "vexohacks26sfo-7088",
+  "api": "routes.googleapis.com",
+  "key_restricted_to_routes": true,
+  "live_test": {
+    "http_status": 200,
+    "routes": 1,
+    "duration": "957s"
+  },
+  "credit_deduction_verified": false,
+  "backend_adapter": {
+    "passed": true,
+    "provider": "Google Maps",
+    "line": "5",
+    "departure_stop": "Fremont St & Market St",
+    "departure_time": "2026-11-14T22:27:31Z",
+    "fetched_at": "2026-11-14T22:14:51.726212+00:00",
+    "origin": "Ferry Building, San Francisco",
+    "destination": "Conservatory of Flowers, San Francisco"
+  }
+}
