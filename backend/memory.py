@@ -32,7 +32,9 @@ lines it heard or saw, each with the time and what the wearer's body was doing. 
 remembering later: tasks and promises, plans and dates, people and what they said or want, facts, what is
 in their fridge or on their shelves, ideas, strong feelings. Skip filler and small talk. Lines marked
 BOOKMARKED were kept on purpose by a tap: always make at least one memory from them, importance 4 or more.
-One short concrete sentence per memory, about "the wearer". Return an empty list when nothing is worth it.
+Band lines start with a tag: "[close voice, probably the wearer]" or "[farther voice, probably someone else]"
+(a loudness guess). Use it to tell the wearer's own words from what another person said or asked for; name the
+person if a name was spoken, otherwise say "someone with the wearer". One short concrete sentence per memory, about "the wearer". Return an empty list when nothing is worth it.
 
 LINES:
 """

@@ -104,6 +104,7 @@ def make_app(providers=None):
 
     @app.post('/api/stop')
     async def stop():
+        app.state.coordinator.warm_until = 0
         await app.state.coordinator.stop()
         await app.state.coordinator.voice.interrupt()
         return {'stopped': True}

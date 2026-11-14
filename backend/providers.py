@@ -42,6 +42,20 @@ class Providers:
         text = ''.join(part.get('text', '') for part in payload.get('candidates', [{}])[0].get('content', {}).get('parts', []) if not part.get('thought'))
         return json.loads(text)
 
+    async def addressed(self, text, speaker, recent, camera_on):
+        """Gate agent: is this sentence a request to the assistant, or talk between people?"""
+        result = await self.gemini(
+            'A blind person wears camera glasses and a wristband microphone that hears everything around them. '
+            'Decide if the NEW SENTENCE is a request or question addressed to their assistant (asking what something is, '
+            'where something is, to read, find, check, remember or stop), or ordinary talk between people. '
+            'Requests are usually in the first person about what the speaker sees, holds or wants to find. '
+            f'Loudness suggests the speaker is: {speaker} ("wearer" = close to the band, "nearby" = someone else; a guess). '
+            f'Camera currently {"on" if camera_on else "off"}. Recent lines: {json.dumps(recent[-4:])}. '
+            f'NEW SENTENCE: {json.dumps(text)}. When unsure answer false.',
+            {'type': 'OBJECT', 'required': ['addressed', 'request'], 'properties': {
+                'addressed': {'type': 'BOOLEAN'}, 'request': {'type': 'STRING'}}})
+        return bool(result.get('addressed')), str(result.get('request') or text)[:300]
+
     async def plan(self, text):
         # Explicit requests do not need a model round trip; novel phrasing still uses Gemini.
         if re.search(r'\b(obstacles?|blocking|chairs?|hazards?)\b|\bin my way\b|\bclear path\b', text, re.I):

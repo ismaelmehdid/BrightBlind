@@ -1,4 +1,6 @@
 """The actual Pipecat path: band PCM -> Deepgram Flux -> planner -> TTS -> relay MP3."""
+import array
+import collections
 import asyncio
 import base64
 import os
@@ -46,7 +48,9 @@ class PlannerInput(FrameProcessor):
         await super().process_frame(frame, direction)
         if isinstance(frame, InterimTranscriptionFrame): return
         if isinstance(frame, (TypedQuestion, TranscriptionFrame)) and direction == FrameDirection.DOWNSTREAM:
-            await self.coordinator.submit(frame.text, 'typed' if isinstance(frame, TypedQuestion) else 'band')
+            typed = isinstance(frame, TypedQuestion)
+            who = 'wearer' if typed else self.coordinator.voice.speaker_guess()
+            await self.coordinator.submit(frame.text, 'typed' if typed else 'band', who)
             return
         await self.push_frame(frame, direction)
 
@@ -108,12 +112,18 @@ class Voice:
     def __init__(self, coordinator):
         self.coordinator = coordinator
         self.buffer = bytearray(); self.muted_until = 0; self.last_seq = -1; self.decoder = None
+        # Loudness of recent band audio, to guess who spoke a turn: the wearer's mouth is ~40 cm from the
+        # wrist, other people are further away, so their turns arrive quieter. An estimate, not diarization
+        # (Deepgram Flux has no speaker labels).
+        self.levels = collections.deque(maxlen=1500)      # (monotonic time, rms) per 20 ms packet, ~30 s
+        self.loudest_turn = 0.0
         processors = []
         self.audio_ready = bool(os.getenv('DEEPGRAM_API_KEY'))
         if self.audio_ready:
             from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
             stt = DeepgramFluxSTTService(api_key=os.environ['DEEPGRAM_API_KEY'], sample_rate=16000,
-                mip_opt_out=True, settings=DeepgramFluxSTTService.Settings(model='flux-general-en', eot_threshold=.75),
+                mip_opt_out=True, settings=DeepgramFluxSTTService.Settings(model='flux-general-en', eot_threshold=.75,
+                    keyterm=['Second Vision', 'Doritos', 'exit', 'holding']),
                 enable_eager_end_of_turn=False)
             processors.append(stt)
         processors.append(PlannerInput(coordinator))
@@ -163,6 +173,21 @@ class Voice:
         if self.tts_session:
             await self.tts_session.close()
 
+    def speaker_guess(self, window=7.0):
+        """'wearer' or 'nearby' for the turn that just ended, from how loud its speech was."""
+        now = time.monotonic()
+        recent = sorted(level for at, level in self.levels if now - at <= window)
+        if len(recent) < 20: return 'unknown'
+        floor = recent[len(recent) // 5]                       # quiet 20%: room noise
+        voiced = [level for level in recent if level > floor * 2.5 and level > 150]
+        if len(voiced) < 8: return 'unknown'
+        voiced.sort()
+        turn = sum(voiced[len(voiced) // 2:]) / (len(voiced) - len(voiced) // 2)      # mean of the louder half
+        self.loudest_turn = max(self.loudest_turn * .995, turn)
+        who = 'wearer' if turn >= self.loudest_turn * .5 else 'nearby'
+        self.coordinator.log('Voice', 'speaker_guess', who, turn_level=round(turn), loudest=round(self.loudest_turn))
+        return who
+
     async def question(self, text):
         await self.start()
         await self.worker.queue_frame(TypedQuestion(text=text))
@@ -206,6 +231,9 @@ class Voice:
             return
         self.last_seq = seq
         if time.monotonic() < self.muted_until: pcm = bytes(len(pcm))
+        elif len(pcm) >= 2:
+            samples = array.array('h'); samples.frombytes(pcm[:len(pcm) // 2 * 2])
+            self.levels.append((time.monotonic(), (sum(v * v for v in samples) / len(samples)) ** .5))
         self.buffer.extend(pcm)
         while len(self.buffer) >= 2560:
             packet = bytes(self.buffer[:2560]); del self.buffer[:2560]

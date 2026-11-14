@@ -31,7 +31,7 @@ def message(message_type, **fields):
 def receive_after_ack(socket):
     for _ in range(6):
         message = socket.receive_json()
-        if message.get('text') != 'Looking now.':
+        if message.get('text') not in ('Looking now.', 'Okay.'):
             return message
     raise AssertionError('Expected a result after the acknowledgement')
 
@@ -49,7 +49,7 @@ class ContractTests(unittest.TestCase):
                 glasses.send_json(message('hello', client='glasses', caps=['capture', 'stream', 'say']))
                 self.assertEqual(glasses.receive_json()['type'], 'stop_speaking')
                 self.assertEqual(client.post('/api/question', json={'text': 'hello'}).status_code, 202)
-                reply = glasses.receive_json()
+                reply = receive_after_ack(glasses)
                 self.assertEqual(reply['type'], 'say')
                 self.assertIn('Pipecat', reply['text'])
                 self.assertIsInstance(reply['ts'], int)

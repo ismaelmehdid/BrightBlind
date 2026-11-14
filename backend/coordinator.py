@@ -50,6 +50,8 @@ class Coordinator:
         self.last_frame = 0
         self.last_summary = ''
         self.last_key = None
+        self.recent_lines = []
+        self.warm_until = 0            # keep the glasses stream on until then: a still from a live stream takes ~2 s, a cold photo 3-6 s
         self.last_said = 0
         self.latest_image = None
         self.listen_until = 0
@@ -119,7 +121,6 @@ class Coordinator:
 
     async def acknowledge_view(self):
         self.log('Coordinator', 'acknowledgement', 'Camera request sent; visual analysis is pending.')
-        await self.voice.say('Looking now.')
 
     async def stop(self):
         self.epoch += 1
@@ -127,19 +128,25 @@ class Coordinator:
         self.route_version += 1
         self.streaming = False
         self.pending.clear()
-        await self.send('glasses', {'type': 'stream', 'on': False, 'fps': 1})
+        if time.monotonic() >= self.warm_until:
+            await self.send('glasses', {'type': 'stream', 'on': False, 'fps': 1})
+        else:
+            self.spawn(self.cooldown())
         await self.send('glasses', {'type': 'stop_speaking'})
         await self.send('band', {'type': 'led', 'color': '#2266ff'})
         self.log('Coordinator', 'stopped', 'Camera tasks invalidated; late results will be discarded.')
 
-    async def submit(self, text, source='typed'):
+    async def submit(self, text, source='typed', speaker='unknown'):
         text = text.strip()[:1000]
         if not text: return
         self.log('Deepgram' if source == 'band' else 'Dashboard', 'transcript', text)
         if source == 'band':
             # Recall: everything the band hears is remembered, also talk the planner ignores (wake word).
-            self.memory.keep(text, 'band', self.activity)
+            tag = {'wearer': 'close voice, probably the wearer', 'nearby': 'farther voice, probably someone else'}.get(speaker, 'unknown voice')
+            self.memory.keep(f'[{tag}] {text}', 'band', self.activity)
+            self.recent_lines = (self.recent_lines + [f'{speaker}: {text}'])[-6:]
         if text.lower() in ('stop', 'got it', 'stop looking', 'stop watching', 'hold on'):
+            self.warm_until = 0                 # an explicit stop also turns the warm stream off
             await self.stop()
             await self.voice.interrupt()
             return
@@ -151,14 +158,32 @@ class Coordinator:
             addressed = re.match(r'^(?:hey\s+)?second\s*vision[\s,:]+(.+)$', text, re.I)
             if addressed: text = addressed[1]
             elif os.getenv('REQUIRE_WAKE_WORD', '0') == '1' and time.monotonic() > self.listen_until:
-                # Not addressed and no double tap: only a sentence that is plainly a request to the glasses
-                # gets through (the last sentence of the transcript, so chatter before it is dropped).
+                # Not addressed by name and no double tap. Fast path: the last sentence is plainly a request.
                 sentences = [part.strip() for part in re.split(r'(?<=[.?!])\s+', text) if part.strip()]
                 request = next((part for part in reversed(sentences[-2:]) if DIRECT_REQUEST.search(part)), None)
-                if not request:
-                    self.log('Coordinator', 'ignored', 'Not addressed to the device (say "Second Vision" or double-tap).')
+                if request:
+                    text = request
+                else:
+                    # Otherwise the gate agent decides (one Gemini call, off the audio path).
+                    self.spawn(self.gate(text, speaker))
                     return
-                text = request
+        await self.accept(text)
+
+    async def gate(self, text, speaker):
+        try:
+            started = time.monotonic()
+            addressed, request = await self.providers.addressed(text, speaker, self.recent_lines[:-1], self.streaming)
+            self.log('Gate · Gemini', 'decision', 'request' if addressed else 'ignored', heard=text[:160], speaker=speaker,
+                     ms=round((time.monotonic() - started) * 1000))
+            if addressed: await self.accept(request)
+        except Exception as error:
+            self.log('Gate · Gemini', 'failed', type(error).__name__)
+
+    async def accept(self, text):
+        # Tell the wearer at once that the request was heard; the answer follows.
+        if os.getenv('WARM_STREAM', '0') == '1': self.warm_until = time.monotonic() + 120
+        self.spawn(self.voice.say('Okay.'))
+        await self.send('band', {'type': 'led', 'color': '#00bb66'})
         self.plan_version += 1
         self.spawn(self.plan(text, self.plan_version))
 
@@ -200,8 +225,7 @@ class Coordinator:
             self.epoch += 1
             self.pending.clear()
             if self.streaming and scene in ('fridge', 'label', 'match'):
-                await self.send('glasses', {'type': 'stream', 'on': False, 'fps': 1})
-                self.streaming = False
+                self.streaming = False          # frames stop being analysed; the stream itself stays warm
             self.scene, self.target = scene, str(plan.get('target', ''))[:250]
             if scene == 'bus' and self.bus:
                 self.target = self.bus['line'] + ' toward ' + self.bus.get('headsign', '')
@@ -214,6 +238,13 @@ class Coordinator:
         except Exception as error:
             self.log('Planner', 'failed', str(error) if isinstance(error, RuntimeError) else type(error).__name__)
             if version == self.plan_version: await self.say('I could not complete that request. Check the provider status on the dashboard.')
+
+    async def cooldown(self):
+        """Turn the warm stream off once no request has come for a while."""
+        while time.monotonic() < self.warm_until: await asyncio.sleep(5)
+        if not self.streaming and 'glasses' in self.clients:
+            await self.send('glasses', {'type': 'stream', 'on': False, 'fps': 1})
+            self.log('Vision', 'stream_cooled', 'No request for two minutes: camera off.')
 
     async def capture(self, epoch=None):
         if os.getenv('LIVE_ONLY', '1') == '1' and self.live_missing(require_band=False):
@@ -282,6 +313,10 @@ class Coordinator:
             request = self.pending.pop(message.get('req_id'), None)
             if not request or request['epoch'] != self.epoch or time.monotonic()-request['at'] > 20:
                 self.log('Vision', 'photo_rejected', 'No matching current capture request'); return
+            self.log('Vision', 'photo_received', message.get('source', '?'), ms=round((time.monotonic()-request['at'])*1000))
+            if self.glasses_state != 'streaming' and time.monotonic() < self.warm_until:
+                await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})      # next still comes from the live stream
+                self.spawn(self.cooldown())
         elif not self.streaming or self.frame_busy or time.monotonic()-self.last_frame < 2:
             return
         value = message.get('jpeg_b64', '')
