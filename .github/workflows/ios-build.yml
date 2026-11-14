@@ -1,0 +1,66 @@
+name: iOS relay (unsigned IPA)
+
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios-build.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: ios
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode 26
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project SecondVision.xcodeproj -scheme SecondVision
+
+      # Developer Mode builds: MetaAppID / ClientToken empty, SDK skips attestation.
+      - name: Build wifi variant (Hotspot Configuration entitlement)
+        run: scripts/build-ipa.sh wifi "META_APP_ID=" "CLIENT_TOKEN=" "APPLE_TEAM_ID=" "CODE_SIGN_ENTITLEMENTS=Config/SecondVision-wifi.entitlements"
+
+      - name: Build ble variant (no extra entitlements)
+        run: scripts/build-ipa.sh ble "META_APP_ID=" "CLIENT_TOKEN=" "APPLE_TEAM_ID=" "CODE_SIGN_ENTITLEMENTS=Config/SecondVision-ble.entitlements"
+
+      - name: Upload IPAs
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecondVision-ipa
+          path: ios/SecondVision-*.ipa
+
+      - name: Publish rolling "ios-latest" release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ios-latest >/dev/null 2>&1 || \
+            gh release create ios-latest --title "iOS relay, latest unsigned IPA" --notes "Rolling build from main. Sign with ios/scripts/install.sh." --prerelease
+          gh release upload ios-latest SecondVision-*.ipa --clobber
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: ios/build-*.log

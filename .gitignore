@@ -5,3 +5,7 @@ __pycache__/
 node_modules/
 *.ipa
 *.xcodeproj/
+ios/build-*/
+ios/Payload-*/
+ios/*.log
+ios/*.xcodeproj/
