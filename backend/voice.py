@@ -116,6 +116,11 @@ class Voice:
         # wrist, other people are further away, so their turns arrive quieter. An estimate, not diarization
         # (Deepgram Flux has no speaker labels).
         self.levels = collections.deque(maxlen=1500)      # (monotonic time, rms) per 20 ms packet, ~30 s
+        # Noise gate: packets quieter than BAND_NOISE_GATE (rms, 0 = off) are sent to Deepgram as silence, so
+        # far-away talk is not transcribed. Live run 11-14: wearer turns 3600-12900, table neighbours 1900-4200.
+        self.gate_level = float(os.getenv('BAND_NOISE_GATE', '0') or 0)
+        self.gate_open_until = 0.0
+        self.gate_preroll = collections.deque(maxlen=4)   # ~80 ms kept so a word's first sound is not cut
         self.loudest_turn = 0.0
         processors = []
         self.audio_ready = bool(os.getenv('DEEPGRAM_API_KEY'))
@@ -233,7 +238,18 @@ class Voice:
         if time.monotonic() < self.muted_until: pcm = bytes(len(pcm))
         elif len(pcm) >= 2:
             samples = array.array('h'); samples.frombytes(pcm[:len(pcm) // 2 * 2])
-            self.levels.append((time.monotonic(), (sum(v * v for v in samples) / len(samples)) ** .5))
+            rms = (sum(v * v for v in samples) / len(samples)) ** .5
+            self.levels.append((time.monotonic(), rms))
+            if self.gate_level:
+                now = time.monotonic()
+                if rms >= self.gate_level:
+                    if now > self.gate_open_until and self.gate_preroll:      # gate opens: replay the lead-in
+                        lead = b''.join(self.gate_preroll); self.gate_preroll.clear()
+                        self.buffer[-len(lead):] = lead if len(self.buffer) >= len(lead) else self.buffer[-len(lead):]
+                    self.gate_open_until = now + .6                          # stay open through pauses in a word
+                elif now > self.gate_open_until:
+                    self.gate_preroll.append(pcm)
+                    pcm = bytes(len(pcm))
         self.buffer.extend(pcm)
         while len(self.buffer) >= 2560:
             packet = bytes(self.buffer[:2560]); del self.buffer[:2560]

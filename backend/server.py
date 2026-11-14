@@ -91,6 +91,11 @@ def make_app(providers=None):
         await app.state.coordinator.voice.question(body.text)
         return {'accepted': True, 'path': 'pipecat → planner → glasses'}
 
+    @app.post('/api/memory/reset')
+    async def memory_reset():
+        app.state.coordinator.recent_lines = []
+        return app.state.coordinator.memory.clear()
+
     @app.get('/api/sessions')
     async def sessions():
         files = sorted(app.state.coordinator.log_dir.glob('*.jsonl'), reverse=True)

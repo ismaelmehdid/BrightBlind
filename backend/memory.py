@@ -83,6 +83,14 @@ class Memory:
         self.db.commit()
         self.last_line = time.time()
 
+    def clear(self):
+        """Forget everything: heard lines and distilled memories."""
+        lines = self.db.execute('DELETE FROM lines').rowcount
+        memories = self.db.execute('DELETE FROM memories').rowcount
+        self.db.commit()
+        self.log('Memory', 'cleared', f'{lines} line(s) and {memories} memory(ies) deleted.')
+        return {'lines': lines, 'memories': memories}
+
     def bookmark(self):
         count = self.db.execute('UPDATE lines SET bookmarked = 1, distilled = 0 WHERE ts >= ?',
                                 (time.time() - BOOKMARK_SECONDS,)).rowcount
