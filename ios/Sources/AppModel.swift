@@ -55,6 +55,7 @@ final class AppModel: ObservableObject {
             self.relay.send(m)
         }
         relay.onCommand = { [weak self] cmd in self?.handle(cmd) }
+        relay.onOpen = { [weak self] in self?.glasses.onState?() }
     }
 
     func start() {

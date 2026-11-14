@@ -13,6 +13,8 @@ final class Relay: ObservableObject {
 
     /// Commands from the backend, decoded JSON objects.
     var onCommand: (@MainActor ([String: Any]) -> Void)?
+    /// Called right after `hello` is sent on every (re)connect.
+    var onOpen: (@MainActor () -> Void)?
     var log: ((String) -> Void)?
 
     private var task: URLSessionWebSocketTask?
@@ -73,6 +75,8 @@ final class Relay: ObservableObject {
         t.resume()
         receiveLoop(t)
         send(["type": "hello", "client": "glasses", "caps": ["capture", "stream", "say", "button"]])
+        // A restarted backend knows nothing about the glasses: repeat the current state after every hello.
+        onOpen?()
         pingTimer?.invalidate()
         pingTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.ping() }
