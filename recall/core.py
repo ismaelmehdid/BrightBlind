@@ -9,6 +9,8 @@ import time
 DISTILL_EVERY = 30        # seconds between distill passes
 DISTILL_QUIET = 6         # wait until nobody spoke for this long (a thought is finished)
 ASK_WINDOW = 20           # after a double-tap, the next sentence within this many seconds is a question
+ASK_SETTLE = 1.5          # a sentence that ends this soon after the double-tap was begun before it: not the question
+ASK_MIN_WORDS = 3         # shorter sentences ("um", "okay so") do not use up the question
 BOOKMARK_SECONDS = 30     # a tap keeps the last 30 seconds of speech
 
 
@@ -24,6 +26,7 @@ class Recall:
                     "voice": False, "brain": brain is not None, "ask_armed": False}
         self._first_steps = None
         self._ask_until = 0.0
+        self._ask_ready = 0.0                 # sentences ending before this belong to what was said before the double-tap
         self._last_speech = 0.0
         self._distilling = False
 
@@ -75,7 +78,8 @@ class Recall:
 
     async def on_double_tap(self, _e=None):
         """Double-tap: the next sentence is a question to the memory."""
-        self._ask_until = time.time() + ASK_WINDOW
+        self._ask_ready = time.time() + ASK_SETTLE
+        self._ask_until = self._ask_ready + ASK_WINDOW
         await self.broadcast("event", self.store.add_event("double-tap", "ask mode"))
         await self.push_ctx()
         await self._say("Yes?")
@@ -90,7 +94,12 @@ class Recall:
         if not text:
             return
         self._last_speech = time.time()
-        if time.time() < self._ask_until:     # a double-tap armed a question
+        # A double-tap armed a question. A sentence that ends right after the tap was already being
+        # spoken before it, and a two-word fragment is not a question: both are stored as speech,
+        # and the window stays open for the real question.
+        is_question = (self._ask_ready <= time.time() < self._ask_until
+                       and (source != "band" or len(text.split()) >= ASK_MIN_WORDS))
+        if is_question:
             self._ask_until = 0
             await self.push_ctx()
             await self.ask(text, source="voice")
