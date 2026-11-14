@@ -33,7 +33,7 @@ const DEFAULTS: Settings = {
   glassesUrl: relayUrl(CFG.glassesToken) || process.env.EXPO_PUBLIC_GLASSES_URL || '',
   bandUrl: relayUrl(CFG.bandToken) || process.env.EXPO_PUBLIC_BAND_URL || '',
 };
-const KEY = 'brightblind.settings';
+const KEY = 'brightblind.settings.v2';   // v1 saves held empty fields that hid the built-in values
 
 const C = {
   bg: '#0b0f14', card: '#141b23', line: '#222c37', text: '#e8eef4', dim: '#8a98a8',
@@ -197,7 +197,10 @@ function Main() {
 
   // Settings are a hidden debug override (long-press the title); the app works without ever opening them.
   useEffect(() => {
-    AsyncStorage.getItem(KEY).then((raw) => { if (raw) setSettings({ ...DEFAULTS, ...JSON.parse(raw) }); }).catch(() => {});
+    // Only non-empty overrides win over the built-in values.
+    AsyncStorage.getItem(KEY).then((raw) => {
+      if (raw) setSettings({ ...DEFAULTS, ...Object.fromEntries(Object.entries(JSON.parse(raw)).filter(([, v]) => v)) });
+    }).catch(() => {});
   }, []);
   const save = (s: Settings) => { setSettings(s); AsyncStorage.setItem(KEY, JSON.stringify(s)).catch(() => {}); };
 
@@ -260,10 +263,10 @@ function Main() {
               <Btn label="Register" onPress={() => phone.register()} />
               <Btn label="Camera" onPress={() => phone.requestCameraPermission()} />
             </> : null}
-            {native && glassesUp ? <>
-              <Btn label="Photo" onPress={() => phone.capture()} />
+            {native && glassesUp ? (
+              // No manual Photo: the backend only accepts photos it asked for (a double-tap asks).
               <Btn label="Test voice" onPress={() => phone.say('BrightBlind is ready.')} />
-            </> : null}
+            ) : null}
           </DeviceCard>
         </View>
 

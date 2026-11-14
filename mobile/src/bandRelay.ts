@@ -144,11 +144,13 @@ export function useBand(recallUrl: string | null | undefined, token?: string | n
       });
     }
     band.on('activity', (e: { state: string; steps: number; cadence: number }) => {
-      const msg = { type: 'activity', state: e.state, steps: e.steps, cadence: e.cadence };
-      last.current.activity = msg;
       setActivity(e.state);
       setSteps(e.steps);
       setCadence(e.cadence);
+      // The backend closes the socket on any other state (the kit can report 'unknown').
+      if (e.state !== 'still' && e.state !== 'walk' && e.state !== 'run') return;
+      const msg = { type: 'activity', state: e.state, steps: e.steps, cadence: e.cadence };
+      last.current.activity = msg;
       send(msg);
     });
     band.on('battery', (e: { percent: number }) => {
