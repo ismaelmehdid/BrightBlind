@@ -61,9 +61,7 @@ streaming, so the backend turns it on per scene, not all day.
 
 ## Changing the backend address without typing on the phone
 
-The app reads the backend URL from a public gist on launch and on Reconnect (a non-empty value
-wins over the text field):
-
-    echo "wss://host/ws" > /tmp/backend-url.txt && gh gist edit $(cat ios/.backend-gist) -f backend-url.txt /tmp/backend-url.txt
+The app reads the backend URL (it carries the relay token) from a secret gist on launch and on
+Reconnect; a non-empty value wins over the text field. Andrii holds the gist id outside the repo.
 
 Test the relay without `backend/`: `uv run --with websockets ios/tools/mock_backend.py`.

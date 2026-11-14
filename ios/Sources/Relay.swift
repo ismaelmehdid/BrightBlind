@@ -27,7 +27,7 @@ final class Relay: ObservableObject {
 
     /// The backend address also lives in the repo (a public gist, see ios/README.md), so it can be changed
     /// with a push instead of typing on the phone. A non-empty file wins over the text field.
-    private static let remoteConfig = "https://gist.githubusercontent.com/andriidrok1/808022925fe5a7e1556c6051eca3dd19/raw/backend-url.txt"
+    private static let remoteConfig = "https://gist.githubusercontent.com/andriidrok1/132465d630f612f6917d308f773119e5/raw/backend-url.txt"
 
     func connect() {
         wanted = true
