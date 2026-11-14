@@ -67,7 +67,7 @@ final class Relay: ObservableObject {
             return
         }
         state = "connecting"
-        log?("ws connecting to \(u.absoluteString)"
+        log?("ws connecting to \(u.absoluteString)")
         let t = session.webSocketTask(with: u)
         task = t
         t.resume()
