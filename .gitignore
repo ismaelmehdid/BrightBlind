@@ -9,3 +9,7 @@ ios/build-*/
 ios/Payload-*/
 ios/*.log
 ios/*.xcodeproj/
+recording.wav
+.venv/
+recall.db
+recall.db-*

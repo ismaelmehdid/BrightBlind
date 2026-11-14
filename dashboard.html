@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Band 63 Live</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --line: #2a2f3a; --text: #e8eaf0; --dim: #8a90a0;
+    --x: #ff6b6b; --y: #51cf66; --z: #4dabf7; --accent: #ffd43b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0 auto 0 0; }
+  #status { color: var(--dim); }
+  #status.on { color: var(--y); }
+  button { background: #2b3140; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; cursor: pointer; font: inherit; }
+  button:hover:not(:disabled) { background: #364056; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: #3b5bdb; border-color: #3b5bdb; }
+  main { display: grid; gap: 12px; padding: 12px 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 8px; }
+  .big { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .sub { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .wide { grid-column: 1 / -1; }
+  canvas { width: 100%; height: 160px; display: block; }
+  .legend span { margin-right: 12px; font-variant-numeric: tabular-nums; }
+  .meter { height: 14px; background: #0b0d11; border-radius: 7px; overflow: hidden; margin: 8px 0; }
+  .meter div { height: 100%; width: 0; background: linear-gradient(90deg, var(--y), var(--accent), var(--x)); transition: width .08s; }
+  #log { max-height: 180px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 12.5px; }
+  #log div { padding: 2px 0; border-bottom: 1px solid #20242d; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=color] { width: 44px; height: 32px; border: none; background: none; padding: 0; }
+  #err { color: var(--x); padding: 0 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vexo-HACK-63 · live</h1>
+  <span id="status">Not connected</span>
+  <button id="usb" class="primary">Connect by USB</button>
+  <button id="sim">Pretend band</button>
+  <button id="stop" disabled>Disconnect</button>
+</header>
+<p id="err"></p>
+<main>
+  <section class="card"><h2>Battery</h2><div class="big" id="bat">–</div><div class="sub" id="batSub"></div></section>
+  <section class="card"><h2>Temperature (chip)</h2><div class="big" id="temp">–</div></section>
+  <section class="card"><h2>Activity</h2><div class="big" id="steps">–</div><div class="sub" id="act"></div></section>
+  <section class="card"><h2>Last gesture</h2><div class="big" id="gesture">–</div><div class="sub" id="gestureSub"></div></section>
+
+  <section class="card wide">
+    <h2>Accelerometer (g)</h2>
+    <canvas id="acc"></canvas>
+    <div class="legend sub"><span style="color:var(--x)" id="ax">ax</span><span style="color:var(--y)" id="ay">ay</span><span style="color:var(--z)" id="az">az</span></div>
+  </section>
+  <section class="card wide">
+    <h2>Gyroscope (°/s)</h2>
+    <canvas id="gyr"></canvas>
+    <div class="legend sub"><span style="color:var(--x)" id="gx">gx</span><span style="color:var(--y)" id="gy">gy</span><span style="color:var(--z)" id="gz">gz</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Microphone loudness</h2>
+    <div class="row"><button id="mic" disabled>Mic on</button><span class="sub" id="micDb">off</span></div>
+    <div class="meter"><div id="micBar"></div></div>
+    <div class="sub">Mic on: the band shows solid blue and records everyone nearby. Only loudness is shown; no sound is kept.</div>
+  </section>
+  <section class="card">
+    <h2>Light</h2>
+    <div class="row">
+      <input type="color" id="colour" value="#00ff88">
+      <button id="ledSet" disabled>Set</button>
+      <button id="ledBlink" disabled>Blink</button>
+      <button id="ledOff" disabled>Off</button>
+    </div>
+    <div class="sub" id="ledSub"></div>
+  </section>
+  <section class="card wide"><h2>Event log</h2><div id="log"></div></section>
+</main>
+
+<script type="module">
+import { Band } from './vexo-open-kit/js/src/index.js';
+
+const BAND = 63;          // our team's band number: Vexo-HACK-63. Change it only here.
+const RATE = 50;          // motion samples per second
+const WINDOW = RATE * 8;  // seconds of motion shown in the charts
+
+const $ = (id) => document.getElementById(id);
+let band = null, micOn = false, firstSteps = null;
+const acc = [], gyr = [];
+
+function log(text) {
+  const d = document.createElement('div');
+  d.textContent = new Date().toLocaleTimeString() + '  ' + text;
+  $('log').prepend(d);
+  while ($('log').children.length > 200) $('log').lastChild.remove();
+}
+function error(e) { $('err').textContent = e ? (e.message || String(e)) : ''; }
+
+function setConnected(on) {
+  $('status').textContent = on ? 'Connected to ' + band.name + ' (' + band.transportKind + ')' : 'Not connected';
+  $('status').className = on ? 'on' : '';
+  for (const id of ['usb', 'sim']) $(id).disabled = on;
+  for (const id of ['stop', 'mic', 'ledSet', 'ledBlink', 'ledOff']) $(id).disabled = !on;
+}
+
+async function connect(transport) {
+  error();
+  $('status').textContent = transport === 'serial' ? 'Pick "USB Serial Device" in the list…' : 'Connecting…';
+  try {
+    band = await Band.connect(BAND, { transport });   // fails with "wrong-band" if another band answers
+  } catch (e) { band = null; setConnected(false); error(e); return; }
+  if (band.number !== BAND) { await band.disconnect(); band = null; error('Not band ' + BAND + ': disconnected.'); return; }
+  setConnected(true);
+  log('connected to ' + band.name + ', firmware ' + band.info.firmware);
+  firstSteps = null; acc.length = 0; gyr.length = 0; micOn = false;
+
+  band.on('motion', (m) => {
+    acc.push([m.ax, m.ay, m.az]); gyr.push([m.gx, m.gy, m.gz]);
+    if (acc.length > WINDOW) acc.shift();
+    if (gyr.length > WINDOW) gyr.shift();
+  });
+  band.on('event', (e) => {
+    const extra = e.face ? ' ' + e.face : '';
+    $('gesture').textContent = e.kind + extra;
+    $('gestureSub').textContent = new Date(e.time).toLocaleTimeString();
+    log('gesture: ' + e.kind + extra);
+  });
+  band.on('activity', (a) => {
+    if (firstSteps === null) firstSteps = a.steps;
+    $('steps').textContent = (a.steps - firstSteps) + ' steps';
+    $('act').textContent = a.state + ' · ' + Math.round(a.cadence) + '/min · lifetime ' + a.steps;
+  });
+  band.on('battery', (b) => {
+    $('bat').textContent = b.percent + '%';
+    $('batSub').textContent = b.state + ' · ' + (b.millivolts / 1000).toFixed(2) + ' V';
+  });
+  band.on('temperature', (t) => { $('temp').textContent = t.celsius.toFixed(1) + ' °C'; });
+  band.on('mic-level', (m) => {
+    $('micBar').style.width = Math.round(m.level * 100) + '%';
+    $('micDb').textContent = 'rms ' + m.rmsDb.toFixed(0) + ' dB below max';
+  });
+  band.on('notice', (n) => log('notice: ' + n.kind));
+  band.on('disconnect', (d) => { log('disconnected: ' + d.reason); if (d.message) error(d.message); band = null; setConnected(false); });
+
+  try {
+    await band.configure({ motion: RATE, events: true, activity: true, battery: true, temperature: true });
+  } catch (e) { error(e); }
+}
+
+$('usb').onclick = () => connect('serial');   // must run inside a click: the browser asks for the port
+$('sim').onclick = () => connect('sim');
+$('stop').onclick = async () => { if (band) await band.disconnect(); };
+
+$('mic').onclick = async () => {
+  try {
+    micOn = !micOn;
+    await band.configure({ micLevel: micOn });
+    $('mic').textContent = micOn ? 'Mic off' : 'Mic on';
+    if (!micOn) { $('micBar').style.width = '0'; $('micDb').textContent = 'off'; }
+    log('microphone ' + (micOn ? 'on' : 'off'));
+  } catch (e) { error(e); }
+};
+
+async function led(fn) {
+  error();
+  if (micOn) { $('ledSub').textContent = 'The light is locked blue while the mic is on.'; return; }
+  try { await fn(); $('ledSub').textContent = ''; } catch (e) { error(e); }
+}
+$('ledSet').onclick = () => led(() => band.setLed($('colour').value));
+$('ledBlink').onclick = () => led(() => band.setLed($('colour').value, { pattern: 'blink', period: 500 }));
+$('ledOff').onclick = () => led(() => band.ledOff());
+
+// Charts: redrawn every frame from the last WINDOW samples.
+function draw(canvas, data, labels, unit, minRange) {
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const c = canvas.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, w, h);
+  let max = minRange;
+  for (const s of data) for (const v of s) max = Math.max(max, Math.abs(v));
+  const y = (v) => h / 2 - (v / max) * (h / 2 - 6);
+  c.strokeStyle = '#2a2f3a'; c.beginPath(); c.moveTo(0, h / 2); c.lineTo(w, h / 2); c.stroke();
+  c.fillStyle = '#8a90a0'; c.font = '11px system-ui';
+  c.fillText('+' + max.toFixed(1), 4, 12); c.fillText('-' + max.toFixed(1), 4, h - 4);
+  const colours = ['#ff6b6b', '#51cf66', '#4dabf7'];
+  for (let k = 0; k < 3; k++) {
+    c.strokeStyle = colours[k]; c.lineWidth = 1.5; c.beginPath();
+    data.forEach((s, i) => { const x = (i / (WINDOW - 1)) * w; i ? c.lineTo(x, y(s[k])) : c.moveTo(x, y(s[k])); });
+    c.stroke();
+  }
+  const last = data[data.length - 1];
+  if (last) labels.forEach((id, k) => { $(id).textContent = id + ' ' + last[k].toFixed(2) + ' ' + unit; });
+}
+(function frame() {
+  draw($('acc'), acc, ['ax', 'ay', 'az'], 'g', 1.2);
+  draw($('gyr'), gyr, ['gx', 'gy', 'gz'], '°/s', 30);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

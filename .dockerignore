@@ -1,0 +1,4 @@
+*
+!requirements-server.txt
+!recall/
+recall/**/__pycache__
