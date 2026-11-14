@@ -48,9 +48,16 @@ band mic ──> laptop: Pipecat (Deepgram Flux STT) ──> SQLite: every sente
 One tap on the band keeps the last 30 seconds; a double-tap followed by a spoken question gets a spoken answer
 (Deepgram TTS on the laptop). A local page (`http://localhost:8100`) shows what was heard, the memories, and the
 band timeline. The same server runs on Railway (`recall/cloud.py`) for the phone. The backend's planner can use it
-as the user's long-term memory (for example the "usual stock" in the fridge scene) by sending
-`{"cmd": "ask", "text": "..."}` on Recall's own `/ws` (a separate server and protocol from the backend's `/ws`
-below).
+as the user's long-term memory (for example the "usual stock" in the fridge scene) over plain HTTP on the same
+server (Railway: add `?token=` or `Authorization: Bearer`):
+
+| Call | Body | Returns |
+|---|---|---|
+| `POST /api/ask` | `{"question": "what is usually in my fridge?"}` | `{"question", "answer", "ts", ...}` (Gemini, from all memories) |
+| `POST /api/note` | `{"text": "..."}` | `{"ok": true}`: stores a line as if the band heard it |
+| `GET /api/memories?limit=200` | | memories, newest first: `kind`, `text`, `people`, `importance`, `context`, `ts` |
+| `GET /api/heard?limit=100` | | the transcript with band context (`activity`, `steps`, `bookmarked`) |
+| `GET /api/context` | | the band right now: `activity`, `steps`, `battery`, `connected`, `mic`, `backend` |
 
 Two hubs, one backend. The band talks only to the laptop. The glasses talk only to the iPhone. The backend talks to both over one WebSocket server and is the only place with logic.
 
@@ -69,8 +76,12 @@ Two hubs, one backend. The band talks only to the laptop. The glasses talk only 
 - **Recall, the memory layer** (`app.py`, `recall/`): see "Memory layer" under Architecture. Run it with
   `.venv\Scripts\python.exe app.py --usb --port COM5` (or `--sim` with no band), then open
   `http://localhost:8100`. Keys go in `.env` (copy `.env.example`): `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`.
-  The band takes one program at a time, so `app.py` and `band/relay.py` cannot both hold it: until Recall
-  forwards to the backend itself, run one or the other.
+- **The band relay is built into Recall** (`recall/relay.py`), so one program holds the band and does both jobs.
+  Add `--backend ws://<backend host>/ws` (or set `BACKEND_WS_URL` in `.env`): it sends `hello`, `audio`
+  (`opus_b64`; `--backend-pcm` for `pcm_b64`), `event` (`tap`, `double-tap`, `free-fall`, `tilt`) and `activity`
+  exactly as in the contract below, reconnects by itself, and runs `led` commands. The band refuses `led` while
+  its microphone is on (kit rule 4), and the microphone is on whenever audio is forwarded.
+  `--sim --backend ...` tests it with no band; the page's tap buttons then tap the pretend band.
 
 ### Tarang: backend + agents (`backend/`)
 

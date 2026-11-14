@@ -38,6 +38,9 @@ def parse_args():
     p.add_argument("--sim-voice", action="store_true", help="pretend band plays the kit's sample speech")
     p.add_argument("--web-port", type=int, default=8100)
     p.add_argument("--db", default=str(ROOT / "recall.db"))
+    p.add_argument("--backend", default=os.getenv("BACKEND_WS_URL"),
+                   help="team backend WebSocket, e.g. ws://host:port/ws: also forward band data there (contract v0)")
+    p.add_argument("--backend-pcm", action="store_true", help="send decoded PCM to the backend instead of Opus")
     return p.parse_args()
 
 
@@ -66,11 +69,19 @@ async def main():
 
     band = None
 
+    # Page buttons. With the pretend band they tap the band itself, so the whole path runs
+    # (band event -> memory -> backend relay); otherwise they act on the memory directly.
     async def tap():
-        await recall.on_tap()
+        if args.sim and band:
+            band.transport.tap("tap")
+        else:
+            await recall.on_tap()
 
     async def double_tap():
-        await recall.on_double_tap()
+        if args.sim and band:
+            band.transport.tap("double-tap")
+        else:
+            await recall.on_double_tap()
 
     runner = await web.start(recall, {"tap": tap, "double-tap": double_tap}, args.web_port)
     print(f"Open http://localhost:{args.web_port}")
@@ -88,17 +99,53 @@ async def main():
     if voice:
         tasks.append(asyncio.create_task(voice.run()))
 
+    relay = None
+    if args.backend:
+        from recall.relay import BackendRelay
+
+        async def backend_status(up):
+            recall.ctx["backend"] = up
+            await recall.push_ctx()
+
+        relay = BackendRelay(args.backend, lambda: band, pcm=args.backend_pcm, on_status=backend_status)
+        recall.ctx["backend"] = False
+        tasks.append(asyncio.create_task(relay.run()))
+        print("Backend relay: forwarding band audio, taps and activity to", args.backend)
+
     try:
         band = await connect_band(args)
         print("Connected to", band.name)
         recall.ctx.update(connected=True, band=band.name)
         store.add_event("connect", band.name)
 
-        band.on("activity", recall.on_activity)
+        async def on_activity(e):
+            await recall.on_activity(e)
+            if relay:
+                await relay.activity(e)
+
+        async def on_tap(e):
+            await recall.on_tap(e)
+            if relay:
+                await relay.event("tap")
+
+        async def on_double_tap(e):
+            await recall.on_double_tap(e)
+            if relay:
+                await relay.event("double-tap")
+
+        async def on_other_event(e):
+            if relay:
+                await relay.event(e.kind)
+            if e.kind == "free-fall":
+                await recall.broadcast("event", store.add_event("free-fall", "the band fell or the wearer did"))
+
+        band.on("activity", on_activity)
         band.on("battery", recall.on_battery)
         band.on("temperature", recall.on_temperature)
-        band.on("tap", recall.on_tap)
-        band.on("double-tap", recall.on_double_tap)
+        band.on("tap", on_tap)
+        band.on("double-tap", on_double_tap)
+        band.on("free-fall", on_other_event)
+        band.on("tilt", on_other_event)
 
         async def on_disconnect(e):
             recall.ctx.update(connected=False, mic=False)
@@ -107,19 +154,31 @@ async def main():
         band.on("disconnect", on_disconnect)
         await band.configure(events=True, activity=True, battery=True, temperature=30)
 
-        if voice:
-            from vexo_open.audio import PcmDecoder
+        if voice or relay:
+            decoder = None
+            if voice or args.backend_pcm:
+                from vexo_open.audio import PcmDecoder
 
-            print("Loading the sound decoder...")
-            decoder = await asyncio.to_thread(PcmDecoder)
-            await voice.transport.input().ready.wait()
+                print("Loading the sound decoder...")
+                decoder = await asyncio.to_thread(PcmDecoder)
+            if voice:
+                await voice.transport.input().ready.wait()
 
             async def on_audio(a):
-                await voice.feed(decoder.feed(a))
+                pcm = decoder.feed(a) if decoder else None
+                if voice:
+                    await voice.feed(pcm)
+                if relay:
+                    await relay.audio(a, pcm)
 
             band.on("audio", on_audio)
-            print("Note: the band's microphone is on. What it hears is sent over the internet to Deepgram "
-                  "(deepgram.com), and the text to Google Gemini. Tell the people near the band.")
+            where = []
+            if voice:
+                where.append("Deepgram (deepgram.com), and the text to Google Gemini")
+            if relay:
+                where.append(f"the team backend at {args.backend}")
+            print("Note: the band's microphone is on. What it hears is sent over the internet to "
+                  + "; and to ".join(where) + ". Tell the people near the band.")
             await band.configure(audio=True)  # solid blue light: mic on, LED locked
             recall.ctx["mic"] = True
         await recall.push_ctx()

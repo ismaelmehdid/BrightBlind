@@ -53,6 +53,49 @@ def make_app(recall, band_actions):
         elif kind in band_actions:
             await band_actions[kind]()
 
+    # --- plain HTTP for the team backend (its planner asks the memory without speaking our /ws) ---
+
+    async def body(req):
+        try:
+            data = await req.json()
+        except ValueError:
+            data = {}
+        return data if isinstance(data, dict) else {}
+
+    def limit(req, default):
+        try:
+            return max(1, min(1000, int(req.query.get("limit", default))))
+        except ValueError:
+            return default
+
+    async def api_context(_req):
+        return web.json_response(recall.ctx)
+
+    async def api_memories(req):
+        return web.json_response(recall.store.memories(limit=limit(req, 200)))
+
+    async def api_heard(req):
+        return web.json_response(recall.store.utterances(limit=limit(req, 100)))
+
+    async def api_ask(req):
+        q = str((await body(req)).get("question", "")).strip()[:2000]
+        if not q:
+            return web.json_response({"error": "question is empty"}, status=400)
+        return web.json_response(await recall.ask(q, source="backend"))
+
+    async def api_note(req):
+        text = str((await body(req)).get("text", "")).strip()[:2000]
+        if not text:
+            return web.json_response({"error": "text is empty"}, status=400)
+        await recall.on_transcript(text, source="backend")
+        return web.json_response({"ok": True})
+
+    app.router.add_get("/api/context", api_context)
+    app.router.add_get("/api/memories", api_memories)
+    app.router.add_get("/api/heard", api_heard)
+    app.router.add_post("/api/ask", api_ask)
+    app.router.add_post("/api/note", api_note)
+
     app.router.add_get("/", index)
     app.router.add_get("/ws", ws_handler)
     app.router.add_static("/static/", STATIC)

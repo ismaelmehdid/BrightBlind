@@ -136,6 +136,7 @@ function renderChips() {
   chip(c.mic ? 'mic on' : 'mic off', c.mic ? 'on' : '');
   chip(c.voice ? 'voice: Pipecat + Deepgram' : 'voice off', c.voice ? 'on' : 'bad');
   chip(c.brain ? 'brain: Gemini 4' : 'brain off', c.brain ? 'on' : 'bad');
+  if (c.backend !== undefined) chip(c.backend ? 'backend: relaying' : 'backend: not reached', c.backend ? 'on' : 'bad');
   if (c.activity) chip(`${c.activity}${c.cadence ? ' · ' + Math.round(c.cadence) + '/min' : ''}`, 'on');
   if (c.steps !== null && c.steps !== undefined) chip(`${c.steps} steps`);
   if (c.battery !== null && c.battery !== undefined) chip(`battery ${c.battery}%`);
