@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recall</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1f; --mute: #6b6b70; --line: #e4e2dd;
+    --accent: #2f6fde; --accent-soft: #e6eefc; --warn: #c2410c; --good: #15803d; --star: #d97706;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121214; --panel: #1c1c1f; --ink: #ececee; --mute: #9a9aa2; --line: #2c2c31;
+            --accent: #6b9bff; --accent-soft: #1f2a44; --warn: #fb923c; --good: #4ade80; --star: #fbbf24; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+  h1 { font-size: 19px; margin: 0 8px 0 0; letter-spacing: -0.01em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 12.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mute); }
+  .chip.on { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
+  .chip.bad { color: var(--warn); border-color: var(--warn); }
+  .chip.ask { color: #fff; background: var(--accent); border-color: var(--accent); animation: pulse 1s infinite alternate; }
+  @keyframes pulse { to { opacity: .55; } }
+  .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { font: inherit; font-size: 13.5px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  main { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 16px; padding: 16px 20px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+            min-width: 0; display: flex; flex-direction: column; max-height: calc(100vh - 110px); }
+  @media (max-width: 1000px) { section { max-height: none; } }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); margin: 0 0 10px;
+       display: flex; align-items: center; gap: 8px; }
+  h2 .n { font-weight: 400; }
+  .scroll { overflow-y: auto; flex: 1; min-height: 120px; }
+  .problem { color: var(--warn); font-size: 13px; margin: 0 0 8px; }
+  .interim { color: var(--mute); font-style: italic; min-height: 1.4em; margin-bottom: 8px; }
+  .line { padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .line:last-child { border-bottom: 0; }
+  .meta { font-size: 12px; color: var(--mute); display: flex; gap: 8px; flex-wrap: wrap; }
+  .star { color: var(--star); }
+  .mem { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; }
+  .kind { font-size: 11.5px; padding: 2px 7px; border-radius: 6px; background: var(--accent-soft); color: var(--accent);
+          height: fit-content; text-transform: uppercase; letter-spacing: .04em; }
+  .mem .text { font-weight: 500; }
+  .mem .meta { grid-column: 2; }
+  .dots { color: var(--accent); letter-spacing: 1px; font-size: 11px; }
+  .x { border: 0; background: none; color: var(--mute); padding: 0 4px; font-size: 16px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .filters button { font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+  .filters button.sel { background: var(--accent); color: #fff; border-color: var(--accent); }
+  form { display: flex; gap: 8px; margin-bottom: 10px; }
+  input[type=text] { flex: 1; min-width: 0; font: inherit; padding: 8px 10px; border-radius: 8px;
+                     border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .qa { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .q { color: var(--mute); font-size: 13.5px; }
+  .a { margin-top: 3px; }
+  .ev { font-size: 13px; padding: 4px 0; color: var(--mute); }
+  .ev b { color: var(--ink); font-weight: 500; }
+  .empty { color: var(--mute); font-size: 13.5px; padding: 6px 0; }
+  .split { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .split > div { min-height: 0; display: flex; flex-direction: column; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+           padding: 8px 14px; border-radius: 8px; font-size: 13.5px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: .92; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Recall</h1>
+  <div class="chips" id="chips"></div>
+  <div class="actions">
+    <button id="tap" title="Same as one tap on the band">Tap: keep this</button>
+    <button id="dtap" title="Same as a double-tap on the band">Double-tap: ask</button>
+    <button id="distill">Distill now</button>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>Heard <span class="n" id="nHeard"></span></h2>
+    <div class="interim" id="interim"></div>
+    <div class="scroll" id="heard"></div>
+    <form id="noteForm"><input type="text" id="note" placeholder="Type a note instead of speaking"><button>Add</button></form>
+  </section>
+  <section>
+    <h2>Memories <span class="n" id="nMem"></span></h2>
+    <p class="problem" id="problem" hidden></p>
+    <div class="filters" id="filters"></div>
+    <div class="scroll" id="mems"></div>
+  </section>
+  <section class="split">
+    <div>
+      <h2>Ask your memory</h2>
+      <form id="askForm"><input type="text" id="question" placeholder="What did Sam want from me?"><button class="primary">Ask</button></form>
+      <div class="scroll" id="answers"></div>
+    </div>
+    <div>
+      <h2>Band timeline</h2>
+      <div class="scroll" id="events"></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const KINDS = ['all', 'task', 'plan', 'person', 'fact', 'idea', 'feeling', 'moment'];
+const state = { ctx: {}, memories: [], utterances: [], events: [], answers: [], filter: 'all' };
+let ws;
+
+const clock = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function el(tag, cls, text) {           // every text from the band or Gemini goes in as textContent
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function toast(text) { const t = $('toast'); t.textContent = text; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2200); }
+function ctxWords(u) {
+  const b = [];
+  if (u.activity) b.push(u.activity);
+  if (u.steps !== null && u.steps !== undefined) b.push(`${u.steps} steps`);
+  return b;
+}
+
+function renderChips() {
+  const c = state.ctx, box = $('chips');
+  box.replaceChildren();
+  const chip = (text, cls) => box.append(el('span', 'chip ' + (cls || ''), text));
+  chip(c.connected ? (c.band || 'band') : 'band not connected', c.connected ? 'on' : 'bad');
+  chip(c.mic ? 'mic on' : 'mic off', c.mic ? 'on' : '');
+  chip(c.voice ? 'voice: Pipecat + Deepgram' : 'voice off', c.voice ? 'on' : 'bad');
+  chip(c.brain ? 'brain: Gemini 4' : 'brain off', c.brain ? 'on' : 'bad');
+  if (c.activity) chip(`${c.activity}${c.cadence ? ' · ' + Math.round(c.cadence) + '/min' : ''}`, 'on');
+  if (c.steps !== null && c.steps !== undefined) chip(`${c.steps} steps`);
+  if (c.battery !== null && c.battery !== undefined) chip(`battery ${c.battery}%`);
+  if (c.ask_armed) chip('listening for your question…', 'ask');
+}
+
+function renderHeard() {
+  const box = $('heard');
+  box.replaceChildren();
+  const list = state.utterances.slice(-200).reverse();
+  if (!list.length) box.append(el('div', 'empty', 'Nothing heard yet. Speak near the band, or type a note below.'));
+  for (const u of list) {
+    const d = el('div', 'line');
+    d.append(el('div', '', u.text));
+    const m = el('div', 'meta');
+    m.append(el('span', '', clock(u.ts)));
+    for (const w of ctxWords(u)) m.append(el('span', '', w));
+    if (u.source === 'typed') m.append(el('span', '', 'typed'));
+    if (u.bookmarked) m.append(el('span', 'star', '★ kept'));
+    d.append(m);
+    box.append(d);
+  }
+  $('nHeard').textContent = state.utterances.length ? `· ${state.utterances.length}` : '';
+}
+
+function renderMems() {
+  const f = $('filters');
+  f.replaceChildren();
+  for (const k of KINDS) {
+    const n = k === 'all' ? state.memories.length : state.memories.filter((m) => m.kind === k).length;
+    if (k !== 'all' && !n) continue;
+    const b = el('button', state.filter === k ? 'sel' : '', `${k} ${n}`);
+    b.onclick = () => { state.filter = k; renderMems(); };
+    f.append(b);
+  }
+  const box = $('mems');
+  box.replaceChildren();
+  const list = state.memories.filter((m) => state.filter === 'all' || m.kind === state.filter)
+    .sort((a, b) => b.ts - a.ts);
+  if (!list.length) box.append(el('div', 'empty', 'No memories yet. Gemini distills what you said every 30 seconds, or press Distill now.'));
+  for (const m of list) {
+    const d = el('div', 'mem');
+    d.append(el('span', 'kind', m.kind));
+    d.append(el('div', 'text', (m.bookmarked ? '★ ' : '') + m.text));
+    const x = el('button', 'x', '×');
+    x.title = 'Forget this';
+    x.onclick = () => send({ cmd: 'forget', id: m.id });
+    d.append(x);
+    const meta = el('div', 'meta');
+    meta.append(el('span', '', clock(m.ts)));
+    if (m.context) meta.append(el('span', '', m.context));
+    if (m.people && m.people.length) meta.append(el('span', '', 'with ' + m.people.join(', ')));
+    meta.append(el('span', 'dots', '●'.repeat(Math.max(1, Math.min(5, m.importance)))));
+    d.append(meta);
+    box.append(d);
+  }
+  $('nMem').textContent = state.memories.length ? `· ${state.memories.length}` : '';
+}
+
+function renderAnswers() {
+  const box = $('answers');
+  box.replaceChildren();
+  if (!state.answers.length) box.append(el('div', 'empty', 'Ask here, or double-tap the band and ask out loud.'));
+  for (const a of state.answers) {
+    const d = el('div', 'qa');
+    d.append(el('div', 'q', (a.source === 'voice' ? '🎙 ' : '') + a.question));
+    d.append(el('div', 'a', a.answer));
+    box.append(d);
+  }
+}
+
+function renderEvents() {
+  const box = $('events');
+  box.replaceChildren();
+  const list = state.events.slice().reverse();
+  if (!list.length) box.append(el('div', 'empty', 'Taps and activity changes show up here.'));
+  for (const e of list) {
+    const d = el('div', 'ev');
+    d.append(document.createTextNode(clock(e.ts) + '  '));
+    d.append(el('b', '', e.kind));
+    if (e.detail) d.append(document.createTextNode('  ' + e.detail));
+    box.append(d);
+  }
+}
+
+function renderAll() { renderChips(); renderHeard(); renderMems(); renderAnswers(); renderEvents(); }
+
+function onMessage(msg) {
+  const d = msg.data;
+  switch (msg.type) {
+    case 'snapshot':
+      Object.assign(state, { ctx: d.ctx, memories: d.memories, utterances: d.utterances, events: d.events, answers: d.answers });
+      $('problem').hidden = !d.brain_problem;
+      $('problem').textContent = d.brain_problem || '';
+      renderAll(); break;
+    case 'ctx': state.ctx = d; renderChips(); break;
+    case 'interim': $('interim').textContent = d.text; break;
+    case 'utterance': state.utterances.push(d); $('interim').textContent = ''; renderHeard(); break;
+    case 'memory': state.memories.push(d); renderMems(); break;
+    case 'forgot': state.memories = state.memories.filter((m) => m.id !== d.id); renderMems(); break;
+    case 'answer': state.answers.unshift(d); renderAnswers(); break;
+    case 'event': state.events.push(d); renderEvents(); break;
+    case 'bookmark': toast(`Kept the last ${d.count} line(s)`); send({ cmd: 'refresh' }); break;
+    case 'distilled': toast(`Gemini read ${d.lines} line(s), made ${d.memories} memory(ies)`); break;
+  }
+}
+
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+function connect() {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  const token = new URLSearchParams(location.search).get('token');   // the cloud server (recall/cloud.py) needs it
+  ws = new WebSocket(`${scheme}://${location.host}/ws` + (token ? `?token=${encodeURIComponent(token)}` : ''));
+  ws.onmessage = (e) => onMessage(JSON.parse(e.data));
+  ws.onclose = () => { state.ctx = { ...state.ctx, connected: false }; renderChips(); setTimeout(connect, 1500); };
+}
+
+$('askForm').onsubmit = (e) => { e.preventDefault(); const q = $('question').value.trim(); if (q) { send({ cmd: 'ask', text: q }); $('question').value = ''; toast('Asking Gemini…'); } };
+$('noteForm').onsubmit = (e) => { e.preventDefault(); const t = $('note').value.trim(); if (t) { send({ cmd: 'note', text: t }); $('note').value = ''; } };
+$('tap').onclick = () => send({ cmd: 'tap' });
+$('dtap').onclick = () => send({ cmd: 'double-tap' });
+$('distill').onclick = () => { send({ cmd: 'distill' }); toast('Distilling…'); };
+connect();
+</script>
+</body>
+</html>

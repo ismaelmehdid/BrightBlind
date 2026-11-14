@@ -1,0 +1,152 @@
+"""The memory layer's heart: band context, what to store, when to distill, how to answer.
+
+Band, Pipecat pipeline and web page all talk to one Recall object on one asyncio loop.
+"""
+import asyncio
+import json
+import time
+
+DISTILL_EVERY = 30        # seconds between distill passes
+DISTILL_QUIET = 6         # wait until nobody spoke for this long (a thought is finished)
+ASK_WINDOW = 20           # after a double-tap, the next sentence within this many seconds is a question
+BOOKMARK_SECONDS = 30     # a tap keeps the last 30 seconds of speech
+
+
+class Recall:
+    def __init__(self, store, brain, brain_problem=None):
+        self.store = store
+        self.brain = brain
+        self.brain_problem = brain_problem
+        self.clients = set()                  # open web pages (aiohttp WebSocketResponse)
+        self.speak = None                     # async fn(text), set by the voice pipeline when it runs
+        self.ctx = {"activity": None, "steps": None, "cadence": None, "battery": None,
+                    "temperature": None, "band": None, "connected": False, "mic": False,
+                    "voice": False, "brain": brain is not None, "ask_armed": False}
+        self._first_steps = None
+        self._ask_until = 0.0
+        self._last_speech = 0.0
+        self._distilling = False
+
+    # --- pushing to the web page ---------------------------------------------------------
+
+    async def broadcast(self, kind, data):
+        msg = json.dumps({"type": kind, "data": data})
+        for ws in list(self.clients):
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                self.clients.discard(ws)
+
+    async def push_ctx(self):
+        self.ctx["ask_armed"] = time.time() < self._ask_until
+        await self.broadcast("ctx", self.ctx)
+
+    def snapshot(self):
+        return {"ctx": self.ctx, "memories": self.store.memories(), "utterances": self.store.utterances(),
+                "events": self.store.events(), "answers": self.store.answers(), "counts": self.store.counts(),
+                "brain_problem": self.brain_problem}
+
+    # --- band data -----------------------------------------------------------------------
+
+    async def on_activity(self, e):
+        if self._first_steps is None:
+            self._first_steps = e.steps
+        old = self.ctx["activity"]
+        self.ctx.update(activity=e.state, steps=e.steps - self._first_steps, cadence=e.cadence)
+        if old is not None and old != e.state:
+            await self.broadcast("event", self.store.add_event("activity", f"{old} -> {e.state}"))
+        await self.push_ctx()
+
+    async def on_battery(self, e):
+        self.ctx["battery"] = getattr(e, "percent", None)
+        await self.push_ctx()
+
+    async def on_temperature(self, e):
+        self.ctx["temperature"] = round(getattr(e, "celsius", getattr(e, "value", 0)) or 0, 1)
+        await self.push_ctx()
+
+    async def on_tap(self, _e=None):
+        """One tap: keep the last moments, even if they sound small."""
+        n = self.store.bookmark_recent(BOOKMARK_SECONDS)
+        await self.broadcast("event", self.store.add_event("tap", f"bookmarked {n} line(s)"))
+        await self.broadcast("bookmark", {"count": n})
+        await self._say("Saved.")
+        self._last_speech = 0                 # distill the bookmark on the next pass
+
+    async def on_double_tap(self, _e=None):
+        """Double-tap: the next sentence is a question to the memory."""
+        self._ask_until = time.time() + ASK_WINDOW
+        await self.broadcast("event", self.store.add_event("double-tap", "ask mode"))
+        await self.push_ctx()
+        await self._say("Yes?")
+
+    # --- speech --------------------------------------------------------------------------
+
+    async def on_interim(self, text):
+        await self.broadcast("interim", {"text": text})
+
+    async def on_transcript(self, text, source="band"):
+        text = text.strip()
+        if not text:
+            return
+        self._last_speech = time.time()
+        if time.time() < self._ask_until:     # a double-tap armed a question
+            self._ask_until = 0
+            await self.push_ctx()
+            await self.ask(text, source="voice")
+            return
+        u = self.store.add_utterance(text, source, self.ctx)
+        await self.broadcast("utterance", u)
+
+    async def ask(self, question, source="typed"):
+        if not self.brain:
+            answer = "I can't think yet: " + (self.brain_problem or "Gemini is off") + "."
+        else:
+            try:
+                answer = await asyncio.to_thread(
+                    self.brain.answer, question, self.store.memories(),
+                    self.store.utterances(limit=150), self.store.events(limit=150))
+            except Exception as e:
+                answer = f"Gemini failed ({type(e).__name__})."
+        row = self.store.add_answer(question, answer, source)
+        await self.broadcast("answer", row)
+        if source == "voice":
+            await self._say(answer)
+        return row
+
+    async def _say(self, text):
+        if self.speak:
+            try:
+                await self.speak(text)
+            except Exception as e:
+                print("Could not speak:", type(e).__name__)
+
+    # --- distilling ----------------------------------------------------------------------
+
+    async def distill_now(self):
+        if not self.brain or self._distilling:
+            return []
+        rows = self.store.undistilled()
+        if not rows:
+            return []
+        self._distilling = True
+        try:
+            items = await asyncio.to_thread(self.brain.distill, rows)
+            made = self.store.add_memories(items, [r["id"] for r in rows])
+            for m in made:
+                await self.broadcast("memory", m)
+            await self.broadcast("distilled", {"lines": len(rows), "memories": len(made)})
+            return made
+        except Exception as e:
+            print("Distill failed:", type(e).__name__, str(e)[:200])
+            return []
+        finally:
+            self._distilling = False
+
+    async def distill_loop(self):
+        while True:
+            await asyncio.sleep(DISTILL_EVERY)
+            if time.time() - self._last_speech >= DISTILL_QUIET:
+                await self.distill_now()
+            if self.ctx["ask_armed"] and time.time() >= self._ask_until:
+                await self.push_ctx()         # the ask window ran out

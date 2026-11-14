@@ -5,3 +5,7 @@ __pycache__/
 node_modules/
 *.ipa
 *.xcodeproj/
+recording.wav
+.venv/
+recall.db
+recall.db-*
