@@ -63,7 +63,37 @@ class Providers:
                 'scene': {'type': 'STRING', 'enum': ['fridge', 'label', 'bus', 'bus_timing', 'shelf', 'scene', 'transit', 'memory', 'stop', 'reply']},
                 **{name: {'type': 'STRING'} for name in ['target', 'origin', 'destination', 'reply']}}})
 
+    async def guide(self, image, target):
+        """Guide (Recall's eyes agent, shelf scene only): one short direction toward the target in the image.
+
+        Image-relative only ("higher", "a bit left", "that one"): what the camera sees, not where to step.
+        Hazards still win, and walking, crossing or boarding words are still refused below."""
+        result = await self.gemini(
+            f'Glasses camera photo. The wearer cannot see well and is looking for: {json.dumps(target)} on a shelf. '
+            'Give ONE spoken direction of at most 8 words toward the target, relative to the center of the image: '
+            '"higher", "lower", "a bit left", "a bit right", "further left", "that one, straight ahead" when it is in '
+            'the center, or "not in view, turn your head slowly" when it is not visible. found=true only when the '
+            'target is clearly in the center of the image. List visible product labels. Report stairs, curbs, '
+            'obstructions or vehicles as hazards. Never tell the wearer to walk, step, cross or board.',
+            {'type': 'OBJECT', 'required': ['description', 'visible', 'hazards', 'uncertain', 'found'], 'properties': {
+                'description': {'type': 'STRING'}, 'visible': {'type': 'ARRAY', 'items': {'type': 'STRING'}},
+                'hazards': {'type': 'ARRAY', 'items': {'type': 'STRING', 'enum': ['stairs', 'curb', 'obstruction', 'vehicle']}},
+                'uncertain': {'type': 'BOOLEAN'}, 'found': {'type': 'BOOLEAN'}}}, image)
+        if not isinstance(result.get('visible'), list) or not isinstance(result.get('hazards'), list):
+            raise RuntimeError('Gemini returned incomplete visual evidence.')
+        result['visible'] = [str(item)[:160] for item in result['visible'][:10]]
+        result['hazards'] = [item for item in result['hazards'] if item in ['stairs', 'curb', 'obstruction', 'vehicle']]
+        result['found'] = bool(result.get('found')) and not result['hazards']
+        if result['hazards']:
+            result['description'] = 'The latest image shows possible ' + ', '.join(result['hazards']) + '. Pause. Use your cane or assistance to check.'
+        else:
+            result['description'] = str(result.get('description', 'Not in view, turn your head slowly.'))[:120]
+            if re.search(r'\b(step|walk|cross|board|run)\b', result['description'], re.I):
+                result['description'] = 'Not sure. Turn your head slowly.'
+        return result
+
     async def vision(self, scene, image, target):
+        if scene == 'shelf': return await self.guide(image, target)
         result = await self.gemini(
             f'Describe this {scene} image for a blind wearer. Target: {json.dumps(target)}. '+
             'Answer in one short sentence, at most 30 words, prioritizing the requested item. List only visible labels or items. If the target is not visible, say so. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For food or a shelf item, describe image-relative position (left/right/center, upper/lower) but never guide the hand. Identify visible stairs, curbs or obstructions. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return description, visible text/items, hazards, and uncertainty.',

@@ -41,6 +41,7 @@ def make_app(providers=None):
         voice = Voice(coordinator)
         coordinator.voice = voice
         app.state.coordinator = coordinator
+        coordinator.spawn(coordinator.memory.loop())   # Recall: distills new lines into memories
         yield
         await coordinator.stop()
         await voice.close()
@@ -151,7 +152,8 @@ def make_app(providers=None):
                         await coordinator.stop()
                         await coordinator.send('band', {'type': 'led', 'color': '#dd3333'})
                         await coordinator.say('The band reported a possible fall. Are you okay? Ask someone nearby for help if needed.')
-                    # Recall owns tap-to-bookmark behavior; tap and tilt are recorded here.
+                    elif event == 'tap' and role == 'band':
+                        coordinator.memory.bookmark()      # Recall: a tap keeps the last 30 seconds (memory.py)
         except (ValueError, json.JSONDecodeError, TimeoutError):
             await socket.close(code=1008, reason='Invalid message or handshake')
         except WebSocketDisconnect:

@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from transit_speech import transit_speech
+from memory import Memory
 
 
 class Coordinator:
@@ -38,6 +39,7 @@ class Coordinator:
         self.listen_until = 0
         self.glasses_state = 'disconnected'
         self.providers.audit = self.log
+        self.memory = Memory(self.db, providers, self.log)     # Recall: the wearer's long-term memory
 
     def live_missing(self, require_band=True):
         roles = ('band', 'glasses') if require_band else ('glasses',)
@@ -62,7 +64,8 @@ class Coordinator:
                     'deepgram': bool(os.getenv('DEEPGRAM_API_KEY')),
                     **({'elevenlabs': bool(os.getenv('ELEVENLABS_API_KEY'))} if os.getenv('VOICE_TTS_PROVIDER') == 'elevenlabs' else {}),
                     'gemini': bool(os.getenv('GEMINI_API_KEY')), 'maps': bool(os.getenv('GOOGLE_MAPS_API_KEY')),
-                    'recall': bool(os.getenv('RECALL_WS_URL'))},
+                    'recall': True},
+                'memory': self.memory.snapshot(),
                 'events': [json.loads(row[0]) for row in self.db.execute('SELECT data FROM events ORDER BY id DESC LIMIT 80')]}
 
     def spawn(self, coroutine):
@@ -105,6 +108,9 @@ class Coordinator:
         text = text.strip()[:1000]
         if not text: return
         self.log('Deepgram' if source == 'band' else 'Dashboard', 'transcript', text)
+        if source == 'band':
+            # Recall: everything the band hears is remembered, also talk the planner ignores (wake word).
+            self.memory.keep(text, 'band', self.activity)
         if text.lower() in ('stop', 'got it', 'stop looking', 'stop watching', 'hold on'):
             await self.stop()
             await self.voice.interrupt()
@@ -131,7 +137,11 @@ class Coordinator:
             if scene == 'reply': await self.say(plan.get('reply') or 'Please ask me to read a view or plan a route.'); return
             if scene == 'memory':
                 self.log('Researcher · Recall', 'started', text)
-                answer = await self.providers.recall(text)
+                try:
+                    answer = await self.memory.answer(text)      # in-process (memory.py)
+                except Exception:
+                    if not os.getenv('RECALL_WS_URL'): raise
+                    answer = await self.providers.recall(text)   # fallback: a separate Recall server
                 if version == self.plan_version:
                     self.log('Researcher · Recall', 'evidence', answer)
                     await self.say(answer)
@@ -261,7 +271,15 @@ class Coordinator:
                 return
             self.log('Vision · Gemini', 'observation', result['description'], visible=result['visible'],
                      hazards=result['hazards'], captured_at=captured_at, ms=round((time.monotonic()-started)*1000))
+            seen = ', '.join(result['visible']) if scene == 'shelf' and result['visible'] else result['description']
+            self.memory.keep(f'Seen through the glasses ({scene}): {seen}', 'glasses', self.activity)
             summary = result['description']
+            if scene == 'shelf' and result.get('found'):
+                # Guide: the target is reached; end the camera session after saying so.
+                self.log('Guide · Gemini', 'goal_reached', target)
+                await self.stop()
+                await self.say(summary)
+                return
             if scene == 'bus' and self.bus:
                 # A number match is evidence, never permission to board or cross.
                 matched = any(re.search(r'(?<!\w)' + re.escape(self.bus['line']) + r'(?!\w)', item, re.I) for item in result['visible']) if self.bus['line'] else False
@@ -278,4 +296,5 @@ class Coordinator:
         await self.stop()
         for task in list(self.tasks): task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+        self.memory.close()
         self.db.close()

@@ -64,9 +64,9 @@ The backend emits only capture, stream, say, stop_speaking and led, with ts. Say
 
 - **Fridge:** capture one image and report visible items. It does not conclude that something is absent from the whole fridge based on one view. Query Recall for known stock; automatic stock comparison is not implemented yet.
 - **Bus:** Google Maps supplies the route, departure stop, line and departure timestamp. The backend schedules a camera session at that estimate minus 60 seconds. That is a departure estimate, not a verified live bus-arrival feed. Visible bus-number matches are reported; they do not authorize boarding or crossing.
-- **Shelf:** stream sampled frames to identify product labels and image-relative location. The backend does not give hand-positioning commands.
+- **Shelf (Guide, agreed with Ismaël):** stream sampled frames; for each, the Guide (`Providers.guide`) speaks one image-relative direction toward the target ("higher", "a bit left", "that one, straight ahead") and ends the camera session when the target is centered. Hazards override it; walking, stepping, crossing and boarding words are still refused. Other scenes keep the no-hand-guidance rule.
 - **Surroundings:** identify visible stairs/curbs/obstructions and announce uncertainty. It never instructs a blind user to take a step down from a monocular image.
-- **Memory/research:** query Ismaël's Recall server with cmd=ask. No personal stock, preferences or facts are invented when Recall is unavailable. An open-web research agent is not implemented.
+- **Memory (Recall, `memory.py`):** every final band transcript (also talk ignored behind the wake word) and every vision observation is kept with the band's activity; Gemini distills memories every 30 s when there is something new; a band tap bookmarks the last 30 s; scene=memory is answered in-process from all memories plus recent lines (`RECALL_WS_URL` is only a fallback). Tables `lines` and `memories` live in `backend.sqlite`. An open-web research agent is not implemented.
 
 Final band speech is considered a request while the session is active. Set REQUIRE_WAKE_WORD=1 to require “Second Vision” or the 20-second window after a double tap.
 
@@ -80,7 +80,7 @@ Required for the full loop:
 | ELEVENLABS_API_KEY | Optional alternative: set VOICE_TTS_PROVIDER=elevenlabs for its sponsor track |
 | GEMINI_API_KEY | Gemini planner and visual observations |
 | GOOGLE_MAPS_API_KEY | Routes API transit planning |
-| RECALL_WS_URL / RECALL_TOKEN | Optional connection to the separate Recall service |
+| RECALL_WS_URL / RECALL_TOKEN | Optional fallback: a separate Recall server, used only if the built-in memory fails |
 
 The Google Maps project must have Routes API enabled and a billing/credit arrangement that permits it. A Gemini key alone does not prove Maps access.
 
