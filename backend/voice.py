@@ -185,18 +185,25 @@ class Voice:
         if not self.audio_ready: return
         encoded = message.get('pcm_b64') or message.get('opus_b64')
         if not isinstance(encoded, str) or len(encoded) > 32000: return
-        data = base64.b64decode(encoded, validate=True)
-        if 'pcm_b64' in message:
-            if len(data) % 2 or len(data) > 16000: return
-            pcm = data
-        else:
-            import av
-            if self.decoder is None:
-                codec = av.CodecContext.create('opus', 'r')
-                codec.extradata = b'OpusHead' + bytes([1, 1]) + b'\x00\x00' + (16000).to_bytes(4, 'little') + b'\x00\x00\x00'
-                self.decoder = (codec, av.AudioResampler(format='s16', layout='mono', rate=16000))
-            codec, resampler = self.decoder
-            pcm = b''.join(bytes(out.planes[0])[:out.samples*2] for frame in codec.decode(av.Packet(data)) for out in resampler.resample(frame))
+        try:
+            data = base64.b64decode(encoded, validate=True)
+            if 'pcm_b64' in message:
+                if len(data) % 2 or len(data) > 16000: return
+                pcm = data
+            else:
+                import av
+                if self.decoder is None:
+                    codec = av.CodecContext.create('opus', 'r')
+                    codec.extradata = b'OpusHead' + bytes([1, 1]) + b'\x00\x00' + (16000).to_bytes(4, 'little') + b'\x00\x00\x00'
+                    self.decoder = (codec, av.AudioResampler(format='s16', layout='mono', rate=16000))
+                codec, resampler = self.decoder
+                pcm = b''.join(bytes(out.planes[0])[:out.samples*2] for frame in codec.decode(av.Packet(data)) for out in resampler.resample(frame))
+        except Exception:
+            # A corrupt or partial packet (Bluetooth drops bytes) is skipped, not fatal: PyAV's InvalidDataError is a
+            # ValueError, which server.py turns into a 1008 close, and the band would reconnect with an audio gap.
+            self.last_seq = seq
+            self.dropped_packets = getattr(self, 'dropped_packets', 0) + 1
+            return
         self.last_seq = seq
         if time.monotonic() < self.muted_until: pcm = bytes(len(pcm))
         self.buffer.extend(pcm)
