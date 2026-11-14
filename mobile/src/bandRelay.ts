@@ -45,7 +45,9 @@ export function bandSocketUrl(recallUrl: string, token?: string | null): string 
     const q = recallUrl.match(/[?&]token=([^&#]+)/);
     if (q) tok = decodeURIComponent(q[1]);
   }
-  return `${base}/band${tok ? `?token=${encodeURIComponent(tok)}` : ''}`;
+  // The team backend's /ws (contract v0) is kept as is; anything else is Recall, at /band.
+  const path = /^wss?:\/\/[^/?#]+\/ws(?:[?#]|$)/i.test(u) ? '/ws' : '/band';
+  return `${base}${path}${tok ? `?token=${encodeURIComponent(tok)}` : ''}`;
 }
 
 export function useBand(recallUrl: string | null | undefined, token?: string | null): BandRelay {
@@ -75,6 +77,8 @@ export function useBand(recallUrl: string | null | undefined, token?: string | n
 
   const send = useCallback((msg: Record<string, unknown>) => {
     const ws = wsRef.current;
+    // The team backend accepts only audio, event and activity from the band and drops the socket otherwise.
+    if (msg.type === 'battery' && urlRef.current && /\/ws(\?|$)/.test(urlRef.current)) return false;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     try {
       ws.send(JSON.stringify({ ...msg, ts: Date.now() }));
@@ -97,8 +101,8 @@ export function useBand(recallUrl: string | null | undefined, token?: string | n
     ws.onopen = () => {
       setSocket('up');
       say('Recall connected');
-      ws.send(JSON.stringify({ type: 'hello', client: 'band', caps: ['audio', 'event', 'activity', 'battery'], ts: Date.now() }));
-      if (last.current.battery) send(last.current.battery as Record<string, unknown>);
+      ws.send(JSON.stringify({ type: 'hello', client: 'band', caps: ['audio', 'events', 'activity'], ts: Date.now() }));
+      if (last.current.battery) send(last.current.battery as Record<string, unknown>);  // Recall only
       if (last.current.activity) send(last.current.activity as Record<string, unknown>);
     };
     ws.onmessage = (m) => {

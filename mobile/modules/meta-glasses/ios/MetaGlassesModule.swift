@@ -22,6 +22,16 @@ public class MetaGlassesModule: Module {
       Task { @MainActor in _ = self.ensureConfigured() }
     }
 
+    /// The app's connection config, written into Info.plist (dict "BrightBlind") by
+    /// mobile/scripts/install-team.sh right before signing: backend URL and relay/dashboard tokens.
+    /// Never in git or in the public release IPA.
+    Function("bundleConfig") { () -> [String: String] in
+      let raw = Bundle.main.object(forInfoDictionaryKey: "BrightBlind") as? [String: Any] ?? [:]
+      var out: [String: String] = [:]
+      for (key, value) in raw { if let s = value as? String { out[key] = s } }
+      return out
+    }
+
     /// Wearables.configure() once, then start watching registration and devices.
     AsyncFunction("configure") { (promise: Promise) in
       Task { @MainActor in

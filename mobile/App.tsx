@@ -11,19 +11,27 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useBand } from './src/bandRelay';
 import { useGlasses } from './src/glassesRelay';
+import { bundleConfig } from './modules/meta-glasses';
 
 type Ctx = Record<string, any>;
 type Step = { ts: number; agent: string; state: string; detail: string; from: 'recall' | 'backend' };
 type Photo = { id: number | string; ts: number; source: string; caption: string; jpeg_b64: string };
 type Line = { id: number; ts: number; text: string; source: string };
-type Settings = { recallUrl: string; recallToken: string; backendUrl: string; backendToken: string; glassesUrl: string };
+type Settings = { recallUrl: string; recallToken: string; backendUrl: string; backendToken: string; glassesUrl: string; bandUrl: string };
 
+// One fixed backend (the team's Railway coordinator). Tokens come from the signed build's Info.plist
+// (mobile/scripts/install-team.sh writes them right before signing), or from .env.local in development.
+const RAILWAY = 'https://backend-production-902365d4.up.railway.app';
+const CFG = bundleConfig();
+const BACKEND = (CFG.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || RAILWAY).replace(/\/+$/, '');
+const relayUrl = (token?: string) => (token ? BACKEND.replace(/^http/, 'ws') + '/ws?token=' + encodeURIComponent(token) : '');
 const DEFAULTS: Settings = {
   recallUrl: process.env.EXPO_PUBLIC_RECALL_URL ?? '',
   recallToken: process.env.EXPO_PUBLIC_RECALL_TOKEN ?? '',
-  backendUrl: process.env.EXPO_PUBLIC_BACKEND_URL ?? '',
-  backendToken: process.env.EXPO_PUBLIC_BACKEND_TOKEN ?? '',
-  glassesUrl: process.env.EXPO_PUBLIC_GLASSES_URL ?? '',
+  backendUrl: BACKEND,
+  backendToken: CFG.dashboardToken || process.env.EXPO_PUBLIC_BACKEND_TOKEN || '',
+  glassesUrl: relayUrl(CFG.glassesToken) || process.env.EXPO_PUBLIC_GLASSES_URL || '',
+  bandUrl: relayUrl(CFG.bandToken) || process.env.EXPO_PUBLIC_BAND_URL || '',
 };
 const KEY = 'brightblind.settings';
 
@@ -160,16 +168,17 @@ function SettingsModal({ open, value, onSave, onClose }: { open: boolean; value:
     <Modal visible={open} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={[st.screen, { padding: 20 }]}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Text style={st.h1}>Connections</Text>
+          <Text style={st.h1}>Debug override</Text>
           <Text style={[st.small, { marginBottom: 18 }]}>
-            The band is plugged into the laptop running Recall. The glasses connect through the SecondVision app to the
-            same Recall (its /glasses address). This app shows and steers both.
+            Not needed for the demo: the signed build already knows the team backend and its tokens. Use this only to
+            point the app somewhere else (a local backend, Recall). Empty fields keep the built-in values.
           </Text>
           {field('recallUrl', 'Recall address', 'https://….trycloudflare.com')}
           {field('recallToken', 'Recall token', 'RECALL_TOKEN', true)}
           {field('backendUrl', 'Team backend address (optional)', 'https://…')}
           {field('backendToken', 'Backend dashboard token (optional)', 'DASHBOARD_TOKENS entry', true)}
-          {field('glassesUrl', 'Glasses link (iOS build; empty = Recall)', 'wss://…/ws?token=<glasses relay token>', true)}
+          {field('glassesUrl', 'Glasses link (backend /ws)', 'wss://…/ws?token=<glasses relay token>', true)}
+          {field('bandUrl', 'Band link (backend /ws)', 'wss://…/ws?token=<band relay token>', true)}
           <View style={st.btnRow}>
             <Btn label="Save" tone="go" onPress={() => { onSave(v); onClose(); }} />
             <Btn label="Cancel" onPress={onClose} />
@@ -186,19 +195,18 @@ function Main() {
   const [goalText, setGoalText] = useState('');
   const [tab, setTab] = useState<'agents' | 'photos'>('agents');
 
+  // Settings are a hidden debug override (long-press the title); the app works without ever opening them.
   useEffect(() => {
-    AsyncStorage.getItem(KEY).then((raw) => {
-      if (raw) setSettings({ ...DEFAULTS, ...JSON.parse(raw) });
-      else if (!DEFAULTS.recallUrl) setShowSettings(true);
-    }).catch(() => {});
+    AsyncStorage.getItem(KEY).then((raw) => { if (raw) setSettings({ ...DEFAULTS, ...JSON.parse(raw) }); }).catch(() => {});
   }, []);
   const save = (s: Settings) => { setSettings(s); AsyncStorage.setItem(KEY, JSON.stringify(s)).catch(() => {}); };
 
-  const recall = useRecall(settings);
+  const recall = useRecall(settings);                  // debug only: off unless a Recall address was set
   const backend = useBackend(settings);
-  // Native build only (available). The glasses talk to the team backend's /ws when a glasses link is set.
-  const phone = useGlasses(settings.glassesUrl || settings.recallUrl, settings.glassesUrl ? '' : settings.recallToken);
-  const phoneBand = useBand(settings.recallUrl, settings.recallToken); // band over this phone's Bluetooth
+  // This phone is the hub (iOS build): glasses over Meta DAT and the band over Bluetooth, both straight to
+  // the team backend's /ws as contract v0 clients.
+  const phone = useGlasses(settings.glassesUrl, '');
+  const phoneBand = useBand(settings.bandUrl, '');
   const { ctx } = recall;
 
   const steps = useMemo(() => [...recall.steps, ...backend.steps].sort((a, b) => b.ts - a.ts).slice(0, 60),
@@ -207,71 +215,81 @@ function Main() {
     [recall.photos, backend.photo]);
   const latest = photos[0];
 
-  const bandUp = recall.up && ctx.connected;
-  const glassesState: string = ctx.glasses ?? 'disconnected';
-  const glassesUp = recall.up && glassesState !== 'disconnected' && !!ctx.glasses;
-  const goal = recall.goal;
-  const lastLine = recall.lines[recall.lines.length - 1];
+  const native = phone.available;
+  const clients: string[] = backend.state?.clients ?? [];
+  const act = backend.state?.activity ?? {};
+  const bandUp = native ? phoneBand.state === 'connected' : clients.includes('band') || (recall.up && !!ctx.connected);
+  const bandBusy = phoneBand.state === 'scanning' || phoneBand.state === 'connecting' || phoneBand.state === 'reconnecting';
+  const glassesState: string = native ? phone.glasses : (backend.state?.streaming ? 'streaming' : clients.includes('glasses') ? 'connected' : 'disconnected');
+  const glassesUp = glassesState !== 'disconnected';
+  const heard: { ts: number; text: string }[] = recall.lines.length
+    ? recall.lines.slice(-4)
+    : backend.steps.filter((s) => s.state === 'transcript').slice(0, 4).reverse().map((s) => ({ ts: s.ts, text: s.detail }));
 
   return (
     <SafeAreaView style={st.screen} edges={['top', 'left', 'right']}>
       <StatusBar style="light" />
       <View style={[st.row, st.header]}>
-        <Text style={st.h1}>BrightBlind</Text>
+        <Pressable onLongPress={() => setShowSettings(true)} delayLongPress={1500}>
+          <Text style={st.h1}>BrightBlind</Text>
+        </Pressable>
         <View style={{ flex: 1 }} />
-        <Dot color={recall.up ? C.ok : C.bad} /><Text style={st.small}>Recall  </Text>
-        {settings.backendUrl ? <><Dot color={backend.up ? C.ok : C.bad} /><Text style={st.small}>Backend  </Text></> : null}
-        <Pressable onPress={() => setShowSettings(true)}><Text style={st.link}>Connect</Text></Pressable>
+        <Dot color={backend.up ? C.ok : C.bad} /><Text style={st.small}>{backend.up ? 'agents online' : backend.err || 'agents offline'}</Text>
       </View>
 
       <ScrollView style={{ flexGrow: 0, maxHeight: '52%' }} contentContainerStyle={{ padding: 12, gap: 10 }}>
         <View style={st.cards}>
-          <DeviceCard title="Vexo band" color={bandUp ? C.ok : C.bad}
-            status={bandUp ? `${ctx.band ?? 'connected'}` : recall.up ? 'not connected to the laptop' : 'Recall offline'}
-            rows={[...(bandUp ? [`${ctx.activity ?? '–'} · ${ctx.steps ?? 0} steps`, `battery ${ctx.battery ?? '–'}% · mic ${ctx.mic ? 'on' : 'off'}`] : []),
-              Platform.OS === 'ios' && phone.available ? `this phone: ${phoneBand.state}${phoneBand.socket !== 'off' ? ` · link ${phoneBand.socket}` : ''}${phoneBand.error ? ` · ${phoneBand.error}` : ''}` : '']}>
-            {Platform.OS === 'ios' && phone.available ? (phoneBand.state === 'idle' || phoneBand.state === 'error'
-              ? <Btn label="Connect band" tone="go" onPress={() => phoneBand.connect()} />
+          <DeviceCard title="Vexo band" color={bandUp ? C.ok : bandBusy ? C.warn : C.bad}
+            status={native ? (phoneBand.state === 'idle' ? 'not connected' : phoneBand.state === 'scanning' ? 'looking… double-tap the band' : phoneBand.state)
+              : bandUp ? 'connected' : 'not connected'}
+            rows={[
+              native && phoneBand.state === 'connected'
+                ? `${phoneBand.activity ?? '–'} · ${phoneBand.steps ?? 0} steps${phoneBand.battery != null ? ` · ${phoneBand.battery}%` : ''}`
+                : act.state ? `${act.state} · ${act.steps ?? 0} steps` : '',
+              native && phoneBand.state !== 'idle' ? `agents link ${phoneBand.socket}` : '',
+              phoneBand.error ?? '']}>
+            {native ? (phoneBand.state === 'idle' || phoneBand.state === 'error'
+              ? <Btn label="Connect" tone="go" onPress={() => phoneBand.connect()} />
               : <Btn label="Disconnect" onPress={() => phoneBand.disconnect()} />) : null}
-            <Btn label="Tap" onPress={() => recall.send({ cmd: 'tap' })} disabled={!recall.up} />
-            <Btn label="Double-tap" onPress={() => recall.send({ cmd: 'double-tap' })} disabled={!recall.up} />
           </DeviceCard>
           <DeviceCard title="Meta glasses" color={glassesUp ? (glassesState === 'streaming' ? C.burst : C.ok) : C.bad}
-            status={glassesUp ? glassesState : phone.available ? `this phone: ${phone.glasses}` : 'open SecondVision on the phone'}
-            rows={[goal ? `burst on: ${goal}` : 'burst off',
-              phone.available ? `link to Recall: ${phone.link}` : '']}>
-            {phone.available && phone.glasses === 'disconnected' ? <>
+            status={glassesState === 'disconnected' ? 'not connected' : glassesState}
+            rows={[native ? `agents link ${phone.link}` : '', backend.state?.scene ? `scene: ${backend.state.scene}` : '']}>
+            {native && phone.glasses === 'disconnected' ? <>
+              <Btn label="Connect" tone="go" onPress={() => phone.connect()} />
               <Btn label="Register" onPress={() => phone.register()} />
               <Btn label="Camera" onPress={() => phone.requestCameraPermission()} />
-              <Btn label="Connect" tone="go" onPress={() => phone.connect()} />
             </> : null}
-            <Btn label="Photo" onPress={() => recall.send({ cmd: 'capture' })} disabled={!glassesUp} />
-            <Btn label="Test voice" onPress={() => recall.send({ cmd: 'say', text: 'BrightBlind is ready.' })} disabled={!recall.up} />
+            {native && glassesUp ? <>
+              <Btn label="Photo" onPress={() => phone.capture()} />
+              <Btn label="Test voice" onPress={() => phone.say('BrightBlind is ready.')} />
+            </> : null}
           </DeviceCard>
         </View>
 
-        <View style={st.card}>
-          <Text style={st.cardTitle}>Photo burst</Text>
-          <Text style={st.small}>The Watcher starts it from what you say. You can also start it here.</Text>
-          <View style={[st.row, { gap: 8, marginTop: 8 }]}>
-            <TextInput style={[st.input, { flex: 1 }]} value={goalText} onChangeText={setGoalText}
-              placeholder={goal ?? 'what to find, e.g. dark chocolate'} placeholderTextColor={C.dim} />
-            {goal
-              ? <Btn label="Stop" tone="stop" onPress={() => recall.send({ cmd: 'burst', on: false })} />
-              : <Btn label="Start" tone="go" disabled={!goalText.trim() || !recall.up}
-                  onPress={() => { recall.send({ cmd: 'burst', on: true, text: goalText }); setGoalText(''); }} />}
+        {recall.up ? (
+          <View style={st.card}>
+            <Text style={st.cardTitle}>Photo burst (Recall)</Text>
+            <View style={[st.row, { gap: 8, marginTop: 8 }]}>
+              <TextInput style={[st.input, { flex: 1 }]} value={goalText} onChangeText={setGoalText}
+                placeholder={recall.goal ?? 'what to find'} placeholderTextColor={C.dim} />
+              {recall.goal
+                ? <Btn label="Stop" tone="stop" onPress={() => recall.send({ cmd: 'burst', on: false })} />
+                : <Btn label="Start" tone="go" disabled={!goalText.trim()}
+                    onPress={() => { recall.send({ cmd: 'burst', on: true, text: goalText }); setGoalText(''); }} />}
+            </View>
           </View>
-        </View>
+        ) : null}
 
         <View style={st.card}>
           <Text style={st.cardTitle}>Heard</Text>
-          {recall.lines.slice(-4).map((l) => (
-            <Text key={l.id} style={st.heard}><Text style={st.dim}>{clock(l.ts)}  </Text>{l.text}</Text>
+          {heard.map((l, i) => (
+            <Text key={`${l.ts}-${i}`} style={st.heard}><Text style={st.dim}>{clock(l.ts)}  </Text>{l.text}</Text>
           ))}
           {recall.interim ? <Text style={[st.heard, st.dim]}>… {recall.interim}</Text> : null}
-          {!lastLine && !recall.interim ? <Text style={st.small}>Nothing yet.</Text> : null}
-          {backend.state?.scene && settings.backendUrl
-            ? <Text style={[st.small, { marginTop: 6 }]}>Backend scene: {backend.state.scene}{backend.state.target ? ` · ${backend.state.target}` : ''}{backend.state.streaming ? ' · streaming' : ''}</Text>
+          {!heard.length && !recall.interim ? <Text style={st.small}>Nothing yet. Connect the band and talk.</Text> : null}
+          {backend.state?.target
+            ? <Text style={[st.small, { marginTop: 6 }]}>Looking for: {backend.state.target}{backend.state.streaming ? ' · camera on' : ''}</Text>
             : null}
         </View>
       </ScrollView>

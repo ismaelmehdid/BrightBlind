@@ -51,6 +51,7 @@ declare class MetaGlassesNative extends NativeModule<MetaGlassesEvents> {
   stopSpeaking(): Promise<void>;
   beep(): Promise<void>;
   getState(): Promise<GlassesState>;
+  bundleConfig?(): Record<string, string>;
 }
 
 // Optional: Expo Go / Android / web have no such module, and the app must still run there.
@@ -77,6 +78,11 @@ export const playMp3 = (base64: string): Promise<void> => (native ? native.playM
 export const stopSpeaking = (): Promise<void> => (native ? native.stopSpeaking() : noop());
 export const beep = (): Promise<void> => (native ? native.beep() : noop());
 export const getState = (): Promise<GlassesState | null> => (native ? native.getState() : Promise.resolve(null));
+/** Connection config written into Info.plist at signing time (install-team.sh): backendUrl, bandToken,
+ *  glassesToken, dashboardToken. Empty object in Expo Go or when the build was not configured. */
+export const bundleConfig = (): Record<string, string> => {
+  try { return (native?.bundleConfig?.() as Record<string, string>) ?? {}; } catch { return {}; }
+};
 
 export function addListener<K extends keyof MetaGlassesEvents>(
   event: K,
