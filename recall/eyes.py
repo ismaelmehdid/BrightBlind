@@ -118,12 +118,17 @@ class Eyes:
         try:
             while self._pending:
                 text, self._pending = self._pending, None
+                await self.recall.agent("Watcher", "reading", text)
                 try:
                     decision = await asyncio.to_thread(self._decide, text)
                 except Exception as e:
                     print("Eyes: Watcher failed:", type(e).__name__, str(e)[:200])
+                    await self.recall.agent("Watcher", "failed", type(e).__name__)
                     continue
                 action = decision.get("action")
+                await self.recall.agent("Watcher", action or "none",
+                                        decision.get("goal") if action == "start" else
+                                        ("stop the burst" if action == "stop" else "not a visual request"))
                 if action == "start" and decision.get("goal"):
                     await self.start(decision["goal"], say=decision.get("say") or "Looking now.")
                 elif action == "stop" and self.active:
@@ -146,6 +151,7 @@ class Eyes:
         self.goal, self.started, self.said = goal[:200], time.time(), []
         self.recall.ctx["eyes"] = self.goal
         await self.recall.push_ctx()
+        await self.recall.agent("Burst", "on", self.goal)
         if not changed:
             await self.recall.glasses.burst(True)
             asyncio.create_task(self._expire(self._epoch))
@@ -160,6 +166,7 @@ class Eyes:
         goal, self.goal = self.goal, None
         self.recall.ctx["eyes"] = None
         await self.recall.push_ctx()
+        await self.recall.agent("Burst", "off", why)
         if self.recall.glasses is not None:
             await self.recall.glasses.burst(False)
         await self._log("burst", f"stop ({why}) after {int(time.time() - self.started)} s, goal was: {goal}")
@@ -179,16 +186,24 @@ class Eyes:
             return
         self._guiding, self._last_guide = True, time.time()
         epoch, taken = self._epoch, time.time()
+        import base64
+
+        image_id = await self.recall.image(base64.b64encode(jpeg).decode(), "burst", "Guide is looking...")
+        await self.recall.agent("Guide", "looking", self.goal)
         try:
             out = await asyncio.to_thread(self._guide, jpeg)
         except Exception as e:
             print("Eyes: Guide failed:", type(e).__name__, str(e)[:200])
+            await self.recall.agent("Guide", "failed", type(e).__name__)
             return
         finally:
             self._guiding = False
         if epoch != self._epoch or time.time() - taken > STALE_PHOTO:
+            await self.recall.caption(image_id, "Burst already ended." if epoch != self._epoch else "Too late, dropped.")
             return
         say = (out.get("say") or "").strip()
+        await self.recall.caption(image_id, f"{out.get('seen', '')} -> {say or '(quiet)'}")
+        await self.recall.agent("Guide", "said" if say else "quiet", say or out.get("seen", ""))
         await self._log("guide", f"{out.get('seen', '')} -> {say or '(quiet)'}")
         if say and not any(t == say and time.time() - ts < REPEAT_GAP for ts, t in self.said):
             self.said = (self.said + [(time.time(), say)])[-5:]

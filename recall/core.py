@@ -36,8 +36,30 @@ class Recall:
         self._ask_ready = 0.0                 # sentences ending before this belong to what was said before the double-tap
         self._last_speech = 0.0
         self._distilling = False
+        self._agents = []                     # recent agent steps, for the phone app's activity feed (not stored)
+        self._images = []                     # recent glasses photos as base64 JPEG, newest last (not stored)
 
     # --- pushing to the web page ---------------------------------------------------------
+
+    async def agent(self, name, state, detail=""):
+        """One step of an agent (Watcher, Guide, Memory, Vision), live on the phone app. Not stored."""
+        row = {"ts": time.time(), "agent": name, "state": state, "detail": str(detail)[:300]}
+        self._agents = (self._agents + [row])[-60:]
+        await self.broadcast("agent", row)
+
+    async def image(self, jpeg_b64, source, caption=""):
+        """A glasses photo, live on the phone app (tap photo, burst photo the Guide looked at). Not stored."""
+        row = {"id": int(time.time() * 1000), "ts": time.time(), "source": source,
+               "caption": str(caption)[:300], "jpeg_b64": jpeg_b64}
+        self._images = (self._images + [row])[-6:]
+        await self.broadcast("image", row)
+        return row["id"]
+
+    async def caption(self, image_id, text):
+        for row in self._images:
+            if row["id"] == image_id:
+                row["caption"] = str(text)[:300]
+        await self.broadcast("caption", {"id": image_id, "caption": str(text)[:300]})
 
     async def broadcast(self, kind, data):
         msg = json.dumps({"type": kind, "data": data})
@@ -54,7 +76,8 @@ class Recall:
     def snapshot(self):
         return {"ctx": self.ctx, "memories": self.store.memories(), "utterances": self.store.utterances(),
                 "events": self.store.events(), "answers": self.store.answers(), "counts": self.store.counts(),
-                "brain_problem": self.brain_problem}
+                "brain_problem": self.brain_problem, "agents": self._agents, "images": self._images,
+                "eyes": self.eyes.goal if self.eyes is not None else None}
 
     # --- band data -----------------------------------------------------------------------
 
@@ -88,6 +111,10 @@ class Recall:
 
     async def on_photo(self, jpeg, name):
         """A photo from the glasses: Gemini says what is in it, and that is kept as a bookmarked memory."""
+        import base64
+
+        image_id = await self.image(base64.b64encode(jpeg).decode(), "tap", "Gemini is describing it...")
+        await self.agent("Vision", "looking", "describing the tap photo for memory")
         if not self.brain:
             text = "A photo was taken through the glasses."
         else:
@@ -96,6 +123,8 @@ class Recall:
             except Exception as e:
                 print("Photo description failed:", type(e).__name__, str(e)[:200])
                 text = "A photo was taken through the glasses."
+        await self.caption(image_id, text)
+        await self.agent("Vision", "done", text)
         u = self.store.add_utterance(text, "glasses", self.ctx, bookmarked=True, photo=name)
         if self.mirror is not None:
             self.mirror.utterance(u)
@@ -159,6 +188,7 @@ class Recall:
         return True
 
     async def ask(self, question, source="typed"):
+        await self.agent("Memory", "thinking", question)
         if not self.brain:
             answer = "I can't think yet: " + (self.brain_problem or "Gemini is off") + "."
         else:
@@ -172,6 +202,7 @@ class Recall:
             except Exception as e:
                 answer = f"Gemini failed ({type(e).__name__})."
         row = self.store.add_answer(question, answer, source)
+        await self.agent("Memory", "answered", answer)
         await self.broadcast("answer", row)
         if source == "voice":
             await self._say(answer)
@@ -200,8 +231,10 @@ class Recall:
             return []
         self._distilling = True
         try:
+            await self.agent("Memory", "distilling", f"{len(rows)} new line(s)")
             items = await asyncio.to_thread(self.brain.distill, rows)
             made = self.store.add_memories(items, [r["id"] for r in rows])
+            await self.agent("Memory", "kept", f"{len(made)} memorie(s)" if made else "nothing worth keeping")
             for m in made:
                 await self.broadcast("memory", m)
             await self.broadcast("distilled", {"lines": len(rows), "memories": len(made)})

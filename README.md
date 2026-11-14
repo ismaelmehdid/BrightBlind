@@ -161,6 +161,9 @@ recall/      Ismaël   Recall: memory store, Gemini brain, Pipecat voice, local 
                       railway.json, .github/workflows/backend.yml deploy it to Railway
 backend/     Tarang   WebSocket server, Pipecat pipeline, agents, dashboard
 ios/         Andrii   Swift relay app, XcodeGen project, GitHub Actions build
+mobile/      Ismaël   Expo control app (Expo Go): band + glasses status, burst control, live agent steps and photos
+                      from Recall's /ws, plus the team backend's /api/state when given its URL and dashboard token.
+                      Run: cd mobile; npx expo start --tunnel ngrok, scan the QR code with Expo Go
 docs/        all      contract.md (this table, kept in sync), demo script, judging notes
 ```
 

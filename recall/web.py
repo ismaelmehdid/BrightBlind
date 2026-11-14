@@ -78,6 +78,15 @@ def make_app(recall, band_actions, glasses=None, token=None):
         elif kind == "forget":
             recall.store.forget_memory(int(cmd.get("id", 0)))
             await recall.broadcast("forgot", {"id": int(cmd.get("id", 0))})
+        elif kind == "burst" and recall.eyes is not None:          # the phone app's manual burst control
+            if cmd.get("on") and text.strip():
+                await recall.eyes.start(text.strip(), say="Looking now.")
+            elif not cmd.get("on"):
+                await recall.eyes.stop("stopped in the app", say="Okay.")
+        elif kind == "capture" and glasses is not None:
+            await glasses.capture("tap")                             # a "tap-" photo: described into memory
+        elif kind == "say" and text.strip():
+            await recall._say(text.strip())
         elif kind in band_actions:
             await band_actions[kind]()
 
