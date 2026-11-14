@@ -56,6 +56,9 @@ struct ContentView: View {
                             Button("Stream off") { glasses.setStreaming(false, fps: nil) }
                         }
                     }
+                    Section("Heading") {
+                        HeadingRow(heading: model.heading)
+                    }
                     if glasses.streamState == "streaming", let frame = glasses.preview {
                         Section("Live stream  \(Int(frame.size.width))x\(Int(frame.size.height))  frames \(glasses.framesSeen)") {
                             Image(uiImage: frame).resizable().scaledToFit().frame(maxHeight: 420)
@@ -82,6 +85,23 @@ struct ContentView: View {
                 Text(k).foregroundStyle(.secondary)
                 Spacer()
                 Text(v).multilineTextAlignment(.trailing).font(.footnote)
+            }
+        }
+    }
+}
+
+
+private struct HeadingRow: View {
+    @ObservedObject var heading: Heading
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(String(format: "yaw %.0f°   %@", heading.yaw,
+                        heading.guiding ? String(format: "target %.0f°  offset %.0f°  %@", heading.targetYaw, heading.offset, heading.lastCue) : "not guiding"))
+                .font(.footnote)
+            HStack {
+                Button("Guide to here") { heading.guide(to: heading.yaw) }
+                Spacer()
+                Button("Stop guide") { heading.stopGuiding() }
             }
         }
     }

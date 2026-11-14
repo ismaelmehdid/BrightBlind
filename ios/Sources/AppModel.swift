@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
     let glasses = GlassesController()
     let relay = Relay()
     let speaker = Speaker()
+    let heading = Heading()
     @Published var lastPhoto: UIImage?
     @Published var lastPhotoInfo = ""
 
@@ -33,12 +34,15 @@ final class AppModel: ObservableObject {
                 "w": Int(image?.size.width ?? 0),
                 "h": Int(image?.size.height ?? 0),
                 "source": source,
+                "yaw": (self.heading.yaw * 10).rounded() / 10,
             ]
             if let reqId { m["req_id"] = reqId }
             self.relay.send(m)
         }
         glasses.onFrame = { [weak self] jpeg, w, h, seq in
-            self?.relay.send(["type": "frame", "jpeg_b64": jpeg.base64EncodedString(), "w": w, "h": h, "seq": seq])
+            guard let self else { return }
+            self.relay.send(["type": "frame", "jpeg_b64": jpeg.base64EncodedString(), "w": w, "h": h, "seq": seq,
+                             "yaw": (self.heading.yaw * 10).rounded() / 10])
         }
         glasses.onButton = { [weak self] press in
             self?.relay.send(["type": "button", "press": press])
@@ -54,11 +58,18 @@ final class AppModel: ObservableObject {
             if let b = self.glasses.battery { m["battery"] = b }
             self.relay.send(m)
         }
+        heading.log = { [weak self] s in self?.glasses.log(s) }
+        heading.speak = { [weak self] cue in self?.speaker.say(cue, interrupt: true) }
+        heading.onZone = { [weak self] zone, off in
+            guard let self else { return }
+            self.relay.send(["type": "guide_state", "zone": zone, "offset": off.rounded(), "yaw": self.heading.yaw.rounded()])
+        }
         relay.onCommand = { [weak self] cmd in self?.handle(cmd) }
         relay.onOpen = { [weak self] in self?.glasses.onState?() }
     }
 
     func start() {
+        heading.start()
         glasses.observeRegistration()
         relay.connect()
     }
@@ -78,6 +89,14 @@ final class AppModel: ObservableObject {
             } else if let text = cmd["text"] as? String, !text.isEmpty {
                 speaker.say(text, language: cmd["language"] as? String ?? "en-US", interrupt: interrupt)
             }
+        case "guide":
+            // {on, target_yaw} absolute, or {on, frame_yaw, offset_deg}: the yaw of the frame the target was
+            // seen in plus its angle from the frame centre (positive = left of centre).
+            let on = (cmd["on"] as? Bool) ?? true
+            let num: (String) -> Double? = { k in (cmd[k] as? Double) ?? (cmd[k] as? Int).map(Double.init) }
+            if !on { heading.stopGuiding() }
+            else if let t = num("target_yaw") { heading.guide(to: t) }
+            else if let f = num("frame_yaw") { heading.guide(to: f + (num("offset_deg") ?? 0)) }
         case "stop_speaking":
             speaker.stop()
         case "beep":
