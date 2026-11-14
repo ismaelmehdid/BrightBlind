@@ -21,6 +21,10 @@ class Recall:
         self.brain_problem = brain_problem
         self.clients = set()                  # open web pages (aiohttp WebSocketResponse)
         self.speak = None                     # async fn(text), set by the voice pipeline when it runs
+        self.glasses = None                   # recall.glasses.Glasses: voice and camera when the phone is connected
+        # With the team backend connected, it owns the conversation (double-tap, speech in the glasses) and
+        # asks Recall over /ws when a question is about memory. Recall then stays silent and only remembers.
+        self.defer_to_backend = False
         self.ctx = {"activity": None, "steps": None, "cadence": None, "battery": None,
                     "temperature": None, "band": None, "connected": False, "mic": False,
                     "voice": False, "brain": brain is not None, "ask_armed": False}
@@ -73,11 +77,30 @@ class Recall:
         n = self.store.bookmark_recent(BOOKMARK_SECONDS)
         await self.broadcast("event", self.store.add_event("tap", f"bookmarked {n} line(s)"))
         await self.broadcast("bookmark", {"count": n})
-        await self._say("Saved.")
+        photo = self.glasses is not None and await self.glasses.capture("tap")
+        await self._say("Saved, and looking." if photo else "Saved.")
         self._last_speech = 0                 # distill the bookmark on the next pass
+
+    async def on_photo(self, jpeg, name):
+        """A photo from the glasses: Gemini says what is in it, and that is kept as a bookmarked memory."""
+        if not self.brain:
+            text = "A photo was taken through the glasses."
+        else:
+            try:
+                text = "Seen through the glasses: " + await asyncio.to_thread(self.brain.describe_photo, jpeg)
+            except Exception as e:
+                print("Photo description failed:", type(e).__name__, str(e)[:200])
+                text = "A photo was taken through the glasses."
+        u = self.store.add_utterance(text, "glasses", self.ctx, bookmarked=True, photo=name)
+        await self.broadcast("utterance", u)
+        self._last_speech = 0
+        await self.distill_now()
 
     async def on_double_tap(self, _e=None):
         """Double-tap: the next sentence is a question to the memory."""
+        if self.defer_to_backend:               # the backend's double-tap: capture + its own listening window
+            await self.broadcast("event", self.store.add_event("double-tap", "handled by the team backend"))
+            return
         self._ask_ready = time.time() + ASK_SETTLE
         self._ask_until = self._ask_ready + ASK_WINDOW
         await self.broadcast("event", self.store.add_event("double-tap", "ask mode"))
@@ -124,6 +147,12 @@ class Recall:
         return row
 
     async def _say(self, text):
+        """Speak in the glasses when the phone is connected, else on the laptop."""
+        if self.defer_to_backend:               # one voice only: the backend's, in the glasses
+            return
+        if self.glasses is not None and self.glasses.connected:
+            if await self.glasses.say(text):
+                return
         if self.speak:
             try:
                 await self.speak(text)

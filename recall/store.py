@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS utterances (
     steps INTEGER,                   -- steps since the app connected
     cadence REAL,
     bookmarked INTEGER DEFAULT 0,    -- the wearer tapped the band to keep this moment
-    distilled INTEGER DEFAULT 0      -- already turned into memories
+    distilled INTEGER DEFAULT 0,     -- already turned into memories
+    photo TEXT                       -- file name in photos/ when the line describes a glasses photo
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY,
@@ -56,6 +57,9 @@ class Store:
         self._lock = threading.Lock()  # Gemini calls run on worker threads
         with self._lock:
             self._db.executescript(SCHEMA)
+            cols = [r[1] for r in self._db.execute("PRAGMA table_info(utterances)")]
+            if "photo" not in cols:            # databases made before photos existed
+                self._db.execute("ALTER TABLE utterances ADD COLUMN photo TEXT")
             self._db.commit()
 
     def _run(self, sql, args=()):
@@ -70,10 +74,12 @@ class Store:
 
     # --- writing ---------------------------------------------------------------------------
 
-    def add_utterance(self, text, source, ctx):
+    def add_utterance(self, text, source, ctx, bookmarked=False, photo=None):
         cur = self._run(
-            "INSERT INTO utterances (ts, text, source, activity, steps, cadence) VALUES (?,?,?,?,?,?)",
-            (time.time(), text, source, ctx.get("activity"), ctx.get("steps"), ctx.get("cadence")),
+            "INSERT INTO utterances (ts, text, source, activity, steps, cadence, bookmarked, photo)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (time.time(), text, source, ctx.get("activity"), ctx.get("steps"), ctx.get("cadence"),
+             int(bookmarked), photo),
         )
         return self.utterance(cur.lastrowid)
 

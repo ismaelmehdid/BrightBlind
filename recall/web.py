@@ -1,18 +1,40 @@
 """Local web page for the memory: live transcript, memories, band context, ask box.
 
 Binds to 127.0.0.1 only: the transcript of the wearer's day must not be readable by the whole event Wi-Fi.
+When a tunnel makes it public (for the glasses' phone), a token guards every path.
 """
+import hmac
 import json
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
 STATIC = Path(__file__).resolve().parent / "static"
+PHOTOS = Path(__file__).resolve().parent.parent / "photos"
 
 
-def make_app(recall, band_actions):
-    """band_actions: dict of async callables the page may trigger (tap, double-tap)."""
-    app = web.Application()
+def token_middleware(token, open_paths=()):
+    """Refuse every request without the token (?token=... or Authorization: Bearer ...)."""
+
+    @web.middleware
+    async def check(req, handler):
+        if req.path in open_paths:
+            return await handler(req)
+        given = req.query.get("token", "")
+        auth = req.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            given = auth[7:]
+        if not hmac.compare_digest(given.encode(), token.encode()):
+            raise web.HTTPUnauthorized(text="missing or wrong token")
+        return await handler(req)
+
+    return check
+
+
+def make_app(recall, band_actions, glasses=None, token=None):
+    """band_actions: dict of async callables the page may trigger (tap, double-tap).
+    glasses: a recall.glasses.Glasses, served at /glasses for Andrii's phone app. token: guard every path."""
+    app = web.Application(middlewares=[token_middleware(token)] if token else [])
 
     async def index(_req):
         return web.FileResponse(STATIC / "index.html")
@@ -99,11 +121,15 @@ def make_app(recall, band_actions):
     app.router.add_get("/", index)
     app.router.add_get("/ws", ws_handler)
     app.router.add_static("/static/", STATIC)
+    PHOTOS.mkdir(exist_ok=True)
+    app.router.add_static("/photos/", PHOTOS)
+    if glasses is not None:
+        app.router.add_get("/glasses", glasses.handler)
     return app
 
 
-async def start(recall, band_actions, port):
-    runner = web.AppRunner(make_app(recall, band_actions))
+async def start(recall, band_actions, port, glasses=None, token=None):
+    runner = web.AppRunner(make_app(recall, band_actions, glasses=glasses, token=token))
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", port).start()
     return runner

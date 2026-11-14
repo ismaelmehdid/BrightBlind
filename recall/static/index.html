@@ -45,6 +45,7 @@
   .line:last-child { border-bottom: 0; }
   .meta { font-size: 12px; color: var(--mute); display: flex; gap: 8px; flex-wrap: wrap; }
   .star { color: var(--star); }
+  .photo { display: block; width: 100%; max-height: 180px; object-fit: cover; border-radius: 8px; margin-bottom: 6px; }
   .mem { padding: 10px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; }
   .kind { font-size: 11.5px; padding: 2px 7px; border-radius: 6px; background: var(--accent-soft); color: var(--accent);
           height: fit-content; text-transform: uppercase; letter-spacing: .04em; }
@@ -109,6 +110,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
+const TOKEN = new URLSearchParams(location.search).get('token');   // set when Recall is reachable from outside
 const KINDS = ['all', 'task', 'plan', 'person', 'fact', 'idea', 'feeling', 'moment'];
 const state = { ctx: {}, memories: [], utterances: [], events: [], answers: [], filter: 'all' };
 let ws;
@@ -136,6 +138,7 @@ function renderChips() {
   chip(c.mic ? 'mic on' : 'mic off', c.mic ? 'on' : '');
   chip(c.voice ? 'voice: Pipecat + Deepgram' : 'voice off', c.voice ? 'on' : 'bad');
   chip(c.brain ? 'brain: Gemini 4' : 'brain off', c.brain ? 'on' : 'bad');
+  chip(c.glasses ? 'glasses: ' + c.glasses : 'glasses off', c.glasses ? 'on' : '');
   if (c.backend !== undefined) chip(c.backend ? 'backend: relaying' : 'backend: not reached', c.backend ? 'on' : 'bad');
   if (c.activity) chip(`${c.activity}${c.cadence ? ' · ' + Math.round(c.cadence) + '/min' : ''}`, 'on');
   if (c.steps !== null && c.steps !== undefined) chip(`${c.steps} steps`);
@@ -150,6 +153,12 @@ function renderHeard() {
   if (!list.length) box.append(el('div', 'empty', 'Nothing heard yet. Speak near the band, or type a note below.'));
   for (const u of list) {
     const d = el('div', 'line');
+    if (u.photo) {                       // a photo from the glasses, next to what Gemini saw in it
+      const img = el('img', 'photo');
+      img.src = '/photos/' + encodeURIComponent(u.photo) + (TOKEN ? '?token=' + encodeURIComponent(TOKEN) : '');
+      img.alt = 'Photo from the glasses';
+      d.append(img);
+    }
     d.append(el('div', '', u.text));
     const m = el('div', 'meta');
     m.append(el('span', '', clock(u.ts)));
@@ -247,8 +256,7 @@ function onMessage(msg) {
 function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 function connect() {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  const token = new URLSearchParams(location.search).get('token');   // the cloud server (recall/cloud.py) needs it
-  ws = new WebSocket(`${scheme}://${location.host}/ws` + (token ? `?token=${encodeURIComponent(token)}` : ''));
+  ws = new WebSocket(`${scheme}://${location.host}/ws` + (TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''));
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => { state.ctx = { ...state.ctx, connected: false }; renderChips(); setTimeout(connect, 1500); };
 }

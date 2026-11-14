@@ -77,11 +77,21 @@ Two hubs, one backend. The band talks only to the laptop. The glasses talk only 
   `.venv\Scripts\python.exe app.py --usb --port COM5` (or `--sim` with no band), then open
   `http://localhost:8100`. Keys go in `.env` (copy `.env.example`): `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`.
 - **The band relay is built into Recall** (`recall/relay.py`), so one program holds the band and does both jobs.
-  Add `--backend ws://<backend host>/ws` (or set `BACKEND_WS_URL` in `.env`): it sends `hello`, `audio`
-  (`opus_b64`; `--backend-pcm` for `pcm_b64`), `event` (`tap`, `double-tap`, `free-fall`, `tilt`) and `activity`
-  exactly as in the contract below, reconnects by itself, and runs `led` commands. The band refuses `led` while
-  its microphone is on (kit rule 4), and the microphone is on whenever audio is forwarded.
-  `--sim --backend ...` tests it with no band; the page's tap buttons then tap the pretend band.
+  Add `--backend "wss://<backend host>/ws?token=<band relay token>"` (or set `BACKEND_WS_URL` in `.env`): it sends
+  `hello`, `audio` (`pcm_b64`, 16 kHz s16le as `backend/` prefers, with its own increasing `seq`; `--backend-opus`
+  for raw Opus), `event` (`tap`, `double-tap`, `free-fall`, `tilt`) and `activity` exactly as in the contract
+  below, reconnects by itself, and runs `led` commands. The band refuses `led` while its microphone is on
+  (kit rule 4), and the microphone is on whenever audio is forwarded.
+  With a backend connected, Recall stays silent and leaves double-tap to the backend (one voice, in the glasses);
+  it keeps transcribing, storing and bookmarking (tap). `--sim --backend ...` tests it with no band.
+- **The backend asks Recall** when its planner picks `memory`: set `RECALL_WS_URL` to Recall's `/ws`. A backend on
+  another machine cannot reach `localhost`, so run Recall with `--tunnel`: it prints a public
+  `https://….trycloudflare.com` address (needs `cloudflared`: `winget install --id Cloudflare.cloudflared`) and
+  protects every path with `RECALL_TOKEN` (from `.env`, or a fresh one printed at start). Then
+  `RECALL_WS_URL=wss://….trycloudflare.com/ws` and `RECALL_TOKEN=<same token>` in the backend's `.env`.
+- **Without the backend, Recall can drive the glasses itself** (`recall/glasses.py`): Andrii's app connects to
+  `wss://…/glasses?token=…` (printed with `--tunnel`). Answers then play in the glasses, and a tap also takes a
+  photo that Gemini describes into a memory.
 
 ### Tarang: backend + agents (`backend/`)
 

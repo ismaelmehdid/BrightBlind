@@ -36,7 +36,9 @@ class BackendRelay:
         self.on_status = on_status
         self.connected = False
         self.sent = {"audio": 0, "event": 0, "activity": 0}
+        self.where = url.split("?")[0]        # for printing: the band URL carries the relay token
         self._ws = None
+        self._seq = 0                         # our own audio counter: the band's wraps at 65535 (after ~22 min)
         self._last_report = time.time()
 
     async def run(self):
@@ -45,9 +47,10 @@ class BackendRelay:
                 async with aiohttp.ClientSession() as session:
                     async with session.ws_connect(self.url, heartbeat=20) as ws:
                         self._ws = ws
+                        self._seq = 0         # the backend resets its counter on reconnect too
                         await self._send({"type": "hello", "client": "band", "caps": CAPS})
                         await self._set_status(True)
-                        print("Backend relay: connected to", self.url)
+                        print("Backend relay: connected to", self.where)
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 await self._command(msg.data)
@@ -89,7 +92,8 @@ class BackendRelay:
     async def audio(self, a, pcm=None):
         if not self.connected:
             return
-        msg = {"type": "audio", "seq": getattr(a, "seq", None)}
+        self._seq += 1
+        msg = {"type": "audio", "seq": self._seq}
         if self.pcm and pcm is not None:
             msg["pcm_b64"] = base64.b64encode(pcm).decode()
         else:

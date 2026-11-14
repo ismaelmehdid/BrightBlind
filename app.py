@@ -9,6 +9,10 @@ questions about them. Tap the band once to keep the last 30 seconds; double-tap 
     python app.py --sim                 a pretend band (add --sim-voice to play the kit's sample speech)
 
 Then open http://localhost:8100 . Keys come from .env (DEEPGRAM_API_KEY, GEMINI_API_KEY), never from code.
+
+Glasses (Andrii's iPhone app, ios/): add --tunnel. Recall gets a public https address and prints the
+wss://.../glasses?token=... line to type into the app. Answers then play in the glasses, and a tap
+also takes a photo that Gemini describes into a memory.
 """
 import argparse
 import asyncio
@@ -40,7 +44,10 @@ def parse_args():
     p.add_argument("--db", default=str(ROOT / "recall.db"))
     p.add_argument("--backend", default=os.getenv("BACKEND_WS_URL"),
                    help="team backend WebSocket, e.g. ws://host:port/ws: also forward band data there (contract v0)")
-    p.add_argument("--backend-pcm", action="store_true", help="send decoded PCM to the backend instead of Opus")
+    p.add_argument("--backend-opus", action="store_true",
+                   help="send the band's raw Opus to the backend instead of decoded PCM (the backend prefers PCM)")
+    p.add_argument("--tunnel", action="store_true",
+                   help="public https address (Cloudflare quick tunnel) so the glasses' phone can connect")
     return p.parse_args()
 
 
@@ -83,8 +90,35 @@ async def main():
         else:
             await recall.on_double_tap()
 
-    runner = await web.start(recall, {"tap": tap, "double-tap": double_tap}, args.web_port)
-    print(f"Open http://localhost:{args.web_port}")
+    from recall.glasses import Glasses
+
+    glasses = Glasses(recall)
+    recall.glasses = glasses
+    token = os.getenv("RECALL_TOKEN") or None
+    if args.tunnel and not token:
+        import secrets
+
+        token = secrets.token_urlsafe(18)    # this run only; set RECALL_TOKEN in .env to keep one
+    if token and len(token) < 16:
+        raise SystemExit("RECALL_TOKEN must be 16 characters or more")
+
+    runner = await web.start(recall, {"tap": tap, "double-tap": double_tap}, args.web_port,
+                             glasses=glasses, token=token)
+    suffix = f"?token={token}" if token else ""
+    print(f"Open http://localhost:{args.web_port}/{suffix}")
+    if not args.tunnel:
+        print(f"Glasses (same network only): ws://localhost:{args.web_port}/glasses{suffix}")
+
+    tunnel_proc = None
+    if args.tunnel:
+        from recall.tunnel import start_tunnel
+
+        try:
+            tunnel_proc, public = await start_tunnel(args.web_port)
+            print("Public address (anyone with the token can read the memory):", f"{public}/{suffix}")
+            print("Type this into the glasses app:", public.replace("https://", "wss://") + "/glasses" + suffix)
+        except Exception as e:
+            print("Tunnel not started:", e)
 
     voice = None
     if os.getenv("DEEPGRAM_API_KEY"):
@@ -107,10 +141,11 @@ async def main():
             recall.ctx["backend"] = up
             await recall.push_ctx()
 
-        relay = BackendRelay(args.backend, lambda: band, pcm=args.backend_pcm, on_status=backend_status)
+        relay = BackendRelay(args.backend, lambda: band, pcm=not args.backend_opus, on_status=backend_status)
+        recall.defer_to_backend = True      # the backend speaks and takes questions; Recall listens and remembers
         recall.ctx["backend"] = False
         tasks.append(asyncio.create_task(relay.run()))
-        print("Backend relay: forwarding band audio, taps and activity to", args.backend)
+        print("Backend relay: forwarding band audio, taps and activity to", relay.where)
 
     try:
         band = await connect_band(args)
@@ -156,7 +191,7 @@ async def main():
 
         if voice or relay:
             decoder = None
-            if voice or args.backend_pcm:
+            if voice or (relay and relay.pcm):
                 from vexo_open.audio import PcmDecoder
 
                 print("Loading the sound decoder...")
@@ -176,7 +211,7 @@ async def main():
             if voice:
                 where.append("Deepgram (deepgram.com), and the text to Google Gemini")
             if relay:
-                where.append(f"the team backend at {args.backend}")
+                where.append(f"the team backend at {relay.where}")
             print("Note: the band's microphone is on. What it hears is sent over the internet to "
                   + "; and to ".join(where) + ". Tell the people near the band.")
             await band.configure(audio=True)  # solid blue light: mic on, LED locked
@@ -200,6 +235,8 @@ async def main():
                 pass
         if voice:
             await voice.stop()
+        if tunnel_proc:
+            tunnel_proc.kill()
         await runner.cleanup()
 
 

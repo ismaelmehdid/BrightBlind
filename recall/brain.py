@@ -49,6 +49,12 @@ when it helps, what they were doing (walking, sitting still). If the memory does
 say so in one sentence. The answer is spoken aloud: one to three short sentences, no lists, no markdown."""
 
 
+PHOTO_INSTRUCTIONS = """You are the eyes of a person who wears camera glasses and may not see well. Describe this photo
+for their memory in two or three plain sentences: where they are, the main things in front of them, and every
+item, label, price, sign or number you can read (for a fridge or a shelf, list the items). No guesses about people's
+identity, no markdown."""
+
+
 def _clock(ts):
     return datetime.fromtimestamp(ts).strftime("%H:%M:%S")
 
@@ -84,6 +90,22 @@ class Brain:
             config.response_mime_type = "application/json"
             config.response_json_schema = schema
         return self.client.models.generate_content(model=MODEL, contents=text, config=config).text
+
+    def describe_photo(self, jpeg):
+        """A JPEG from the glasses -> a short description to keep as a memory."""
+        import base64
+
+        if hasattr(self.client, "interactions"):
+            parts = [{"type": "text", "text": "Describe this photo."},
+                     {"type": "image", "data": base64.b64encode(jpeg).decode(), "mime_type": "image/jpeg"}]
+            return self.client.interactions.create(
+                model=MODEL, system_instruction=PHOTO_INSTRUCTIONS, input=parts,
+                generation_config={"thinking_level": "low"}).output_text.strip()
+        from google.genai import types
+
+        return self.client.models.generate_content(
+            model=MODEL, contents=[types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), "Describe this photo."],
+            config=types.GenerateContentConfig(system_instruction=PHOTO_INSTRUCTIONS)).text.strip()
 
     def distill(self, utterances):
         """Utterance rows -> list of memory dicts (with ts and bookmarked filled in)."""
