@@ -35,6 +35,8 @@ class Coordinator:
         self.frame_busy = False
         self.last_frame = 0
         self.last_summary = ''
+        self.last_key = None
+        self.last_said = 0
         self.latest_image = None
         self.listen_until = 0
         self.glasses_state = 'disconnected'
@@ -160,7 +162,7 @@ class Coordinator:
                 await self.say('I’m checking Google Maps for the bus route.')
                 self.route_version += 1
                 self.spawn(self.transit(plan['origin'], plan['destination'], self.route_version)); return
-            if scene not in ('fridge', 'label', 'bus', 'shelf', 'scene'): raise RuntimeError('Planner returned an unsupported action.')
+            if scene not in ('fridge', 'label', 'bus', 'shelf', 'scene', 'exit'): raise RuntimeError('Planner returned an unsupported action.')
             self.epoch += 1
             self.pending.clear()
             if self.streaming and scene in ('fridge', 'label'):
@@ -172,7 +174,9 @@ class Coordinator:
             if scene in ('fridge', 'label'):
                 await self.capture(self.epoch)
             else:
-                await self.stream(self.epoch, 30)
+                # The agent ends the session itself (answer given, goal reached, "stop"); this is only a safety cap.
+                self.last_summary, self.last_key, self.last_said = '', None, 0
+                await self.stream(self.epoch, 180)
         except Exception as error:
             self.log('Planner', 'failed', str(error) if isinstance(error, RuntimeError) else type(error).__name__)
             if version == self.plan_version: await self.say('I could not complete that request. Check the provider status on the dashboard.')
@@ -209,7 +213,7 @@ class Coordinator:
             await asyncio.sleep(duration)
             if epoch == self.epoch and self.streaming:
                 await self.stop()
-                await self.say('The short camera session has ended.')
+                await self.say('Camera off.')
         self.spawn(expire())
 
     async def transit(self, origin, destination, version):
@@ -265,6 +269,7 @@ class Coordinator:
             result = await self.providers.vision(scene, image, target)
             if epoch != self.epoch: return
             age_ms = round(time.time()*1000 - captured_at)
+            if scene == 'exit' and age_ms > 8000: return      # wearer is turning: an old frame is just dropped
             if scene in ('scene', 'bus', 'shelf') and age_ms > 8000:
                 self.log('Vision · Gemini', 'stale_result_discarded', 'Analysis arrived too late for a current scene description.', age_ms=age_ms)
                 await self.say('This view took too long to process and is no longer current. Please pause for a fresh view.')
@@ -284,8 +289,25 @@ class Coordinator:
                 # A number match is evidence, never permission to board or cross.
                 matched = any(re.search(r'(?<!\w)' + re.escape(self.bus['line']) + r'(?!\w)', item, re.I) for item in result['visible']) if self.bus['line'] else False
                 summary += ' The visible number matches the planned line; confirm the direction and boarding with the driver.' if matched else ' I have not confirmed a match to your planned bus.'
-            if summary != self.last_summary:
-                self.last_summary = summary; await self.say(summary)
+            if scene == 'exit':
+                if result.get('found'):
+                    self.log('Guide · Gemini', 'goal_reached', 'exit ' + str(result.get('position')))
+                    await self.stop()                      # the agent closes the camera once it has the answer
+                    await self.say(summary)
+                elif time.monotonic() - self.last_said > 7 or summary != self.last_summary:
+                    self.last_summary, self.last_said = summary, time.monotonic()
+                    await self.say(summary)
+                return
+            if scene == 'scene':
+                # "What is in front of me" is one question: answer once and close the camera.
+                await self.stop()
+                await self.say(summary)
+                return
+            # Same content in a different word order is still a repeat.
+            key = frozenset(re.findall(r'[a-z0-9]+', summary.lower()))
+            if key != self.last_key:
+                self.last_key, self.last_summary = key, summary
+                await self.say(summary)
         except Exception as error:
             self.log('Vision · Gemini', 'failed', str(error) if isinstance(error, RuntimeError) else type(error).__name__)
             if epoch == self.epoch: await self.say('I could not read this view reliably. Please pause and try a clearer view.')
