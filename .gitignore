@@ -1,0 +1,7 @@
+.env
+*.env
+vexo-open-kit/
+__pycache__/
+node_modules/
+*.ipa
+*.xcodeproj/
