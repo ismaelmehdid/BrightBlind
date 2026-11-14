@@ -28,6 +28,8 @@ final class GlassesController: ObservableObject {
     @Published var buttonReady = false
     @Published var framesSeen = 0
     @Published var framesSent = 0
+    /// Latest stream frame, shown live in the app.
+    @Published var preview: UIImage?
     @Published var lines: [String] = []
     @Published var deviceInfo = "no glasses seen yet"
     @Published var battery: Int?
@@ -397,11 +399,14 @@ final class GlassesController: ObservableObject {
                 self.framesSeen += 1
                 if self.framesSeen == 1 || self.framesSeen % 50 == 0 { self.log("frames seen: \(self.framesSeen)") }
             }
+            // Every frame goes to the on-screen preview; only `sendFps` of them go to the backend.
+            guard let image = frame.makeUIImage() else { return }
+            Task { @MainActor in self.preview = image }
             let now = Date()
             let interval = 1.0 / max(0.2, self.sendFpsSnapshot())
             guard now.timeIntervalSince(self.lastFrameSentUnsafe) >= interval else { return }
             self.lastFrameSentUnsafe = now
-            guard let image = frame.makeUIImage(), let jpeg = image.jpegData(compressionQuality: 0.6) else { return }
+            guard let jpeg = image.jpegData(compressionQuality: 0.6) else { return }
             let w = Int(image.size.width * image.scale), h = Int(image.size.height * image.scale)
             self.frameSeqUnsafe += 1
             let seq = self.frameSeqUnsafe

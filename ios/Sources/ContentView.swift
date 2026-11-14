@@ -56,6 +56,12 @@ struct ContentView: View {
                             Button("Stream off") { glasses.setStreaming(false, fps: nil) }
                         }
                     }
+                    if glasses.streamState == "streaming", let frame = glasses.preview {
+                        Section("Live stream  \(Int(frame.size.width))x\(Int(frame.size.height))  frames \(glasses.framesSeen)") {
+                            Image(uiImage: frame).resizable().scaledToFit().frame(maxHeight: 420)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
                     if let photo = model.lastPhoto {
                         Section("Last photo \(model.lastPhotoInfo)") {
                             Image(uiImage: photo).resizable().scaledToFit().frame(maxHeight: 220)
