@@ -46,6 +46,8 @@ class Providers:
         # Explicit requests do not need a model round trip; novel phrasing still uses Gemini.
         if re.search(r'\b(obstacles?|blocking|chairs?|hazards?)\b|\bin my way\b|\bclear path\b', text, re.I):
             return {'scene':'scene', 'target':text, 'reply':'Describe visible potential obstacles; do not direct walking.', 'source':'explicit command'}
+        if re.search(r'\b(holding|in my hand)\b', text, re.I) or (re.search(r'\b(is (this|it)|does (this|it))\b', text, re.I) and re.search(r'\b(want(s|ed)?|asked|ask for|need(s|ed)?|told me|right one)\b', text, re.I)):
+            return {'scene': 'match', 'target': text, 'reply': 'Identify the item in view and compare it with memory.', 'source': 'explicit command'}
         if re.search(r'\b(exit|way out|get out|leave|door)\b', text, re.I):
             return {'scene': 'exit', 'target': text, 'reply': 'Find the exit in the camera view.', 'source': 'explicit command'}
         if re.search(r'\bbus\b', text, re.I) and re.search(r'\b(when|timing|arrival|coming|next|how long|what time)\b', text, re.I):
@@ -63,9 +65,9 @@ class Providers:
             return {'scene': 'transit', 'origin': route[1], 'destination': route[2], 'target': '', 'reply': 'Plan the supplied route.', 'source': 'explicit command'}
         return await self.gemini(
             'Choose one operation for this wearable request: ' + json.dumps(text) +
-            '. fridge=inspect refrigerator contents; label=read a label, price, document or sign in one photo; bus=read bus numbers; shelf=find a named product; exit=find the exit or a door out of the room; scene=describe surroundings including visible stairs; transit=plan between explicit addresses; memory=recall personal information; stop=end camera session. For transit extract only explicit origin/destination, otherwise leave empty and ask. No instructions to move a foot, hand, cross a road or board a bus. Reply briefly for unsupported requests.',
+            '. fridge=inspect refrigerator contents; label=read a label, price, document or sign in one photo; bus=read bus numbers; shelf=find a named product; exit=find the exit or a door out of the room; match=identify the item the wearer holds or looks at and compare it with what someone asked for or what they remember; scene=describe surroundings including visible stairs; transit=plan between explicit addresses; memory=recall personal information; stop=end camera session. For transit extract only explicit origin/destination, otherwise leave empty and ask. No instructions to move a foot, hand, cross a road or board a bus. Reply briefly for unsupported requests.',
             {'type': 'OBJECT', 'required': ['scene', 'target', 'origin', 'destination', 'reply'], 'properties': {
-                'scene': {'type': 'STRING', 'enum': ['fridge', 'label', 'bus', 'bus_timing', 'shelf', 'exit', 'scene', 'transit', 'memory', 'stop', 'reply']},
+                'scene': {'type': 'STRING', 'enum': ['fridge', 'label', 'bus', 'bus_timing', 'shelf', 'exit', 'match', 'scene', 'transit', 'memory', 'stop', 'reply']},
                 **{name: {'type': 'STRING'} for name in ['target', 'origin', 'destination', 'reply']}}})
 
     async def guide(self, image, target):
@@ -131,7 +133,7 @@ class Providers:
         if scene == 'shelf': return await self.guide(image, target)
         if scene == 'exit': return await self.find_exit(image)
         result = await self.gemini(
-            f'Describe this {scene} image for a blind wearer. Target: {json.dumps(target)}. '+
+            f'Describe this {dict(match="hand-held product").get(scene, scene)} image for a blind wearer. Target: {json.dumps(target)}. '+
             'Answer in one short sentence, at most 15 words, prioritizing the requested item. List only visible labels or items. If the target is not visible, say so. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For food or a shelf item, describe image-relative position (left/right/center, upper/lower) but never guide the hand. Identify visible stairs, curbs or potential obstructions such as chairs, tables, bags, boxes, cables or other objects. Include at most two in obstacles, with camera-image position; do not infer they actually block a path or how far away they are. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return description, visible text/items, hazards, obstacles, and uncertainty.',
             {'type': 'OBJECT', 'required': ['description', 'visible', 'hazards', 'uncertain'], 'properties': {
                 'description': {'type': 'STRING'}, 'visible': {'type': 'ARRAY', 'items': {'type': 'STRING'}},

@@ -162,16 +162,16 @@ class Coordinator:
                 await self.say('I’m checking Google Maps for the bus route.')
                 self.route_version += 1
                 self.spawn(self.transit(plan['origin'], plan['destination'], self.route_version)); return
-            if scene not in ('fridge', 'label', 'bus', 'shelf', 'scene', 'exit'): raise RuntimeError('Planner returned an unsupported action.')
+            if scene not in ('fridge', 'label', 'bus', 'shelf', 'scene', 'exit', 'match'): raise RuntimeError('Planner returned an unsupported action.')
             self.epoch += 1
             self.pending.clear()
-            if self.streaming and scene in ('fridge', 'label'):
+            if self.streaming and scene in ('fridge', 'label', 'match'):
                 await self.send('glasses', {'type': 'stream', 'on': False, 'fps': 1})
                 self.streaming = False
             self.scene, self.target = scene, str(plan.get('target', ''))[:250]
             if scene == 'bus' and self.bus:
                 self.target = self.bus['line'] + ' toward ' + self.bus.get('headsign', '')
-            if scene in ('fridge', 'label'):
+            if scene in ('fridge', 'label', 'match'):
                 await self.capture(self.epoch)
             else:
                 # The agent ends the session itself (answer given, goal reached, "stop"); this is only a safety cap.
@@ -289,6 +289,18 @@ class Coordinator:
                 # A number match is evidence, never permission to board or cross.
                 matched = any(re.search(r'(?<!\w)' + re.escape(self.bus['line']) + r'(?!\w)', item, re.I) for item in result['visible']) if self.bus['line'] else False
                 summary += ' The visible number matches the planned line; confirm the direction and boarding with the driver.' if matched else ' I have not confirmed a match to your planned bus.'
+            if scene == 'match':
+                # Eyes + memory in one answer: what is in the hand, and is it what someone asked for.
+                items = ', '.join(result['visible']) or result['description']
+                self.log('Researcher · Recall', 'started', f'{target} | seen: {items}')
+                answer = await self.memory.answer(
+                    f'The wearer is holding or looking at: {items}. Their question: {target}. First say what the item is. '
+                    'Then say whether it matches what someone asked for or wanted, naming who and when if the memory says. '
+                    'Mention a price only if it is in the item list. If the memory holds no such request, say so.')
+                if epoch == self.epoch:
+                    self.log('Researcher · Recall', 'evidence', answer)
+                    await self.say(answer)
+                return
             if scene == 'exit':
                 if result.get('found'):
                     self.log('Guide · Gemini', 'goal_reached', 'exit ' + str(result.get('position')))
