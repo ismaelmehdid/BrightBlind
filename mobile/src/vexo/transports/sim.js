@@ -1037,7 +1037,8 @@ export class SimTransport extends Transport {
     let os;
     let crypto;
     try {
-      [fs, path, os, crypto] = await Promise.all(['node:fs', 'node:path', 'node:os', 'node:crypto'].map((name) => import(name)));
+      // BrightBlind app: Metro cannot bundle a dynamic import(name); the pretend band's file storage is Node-only.
+      throw new Error('no file storage in the app');
     } catch {
       throw new VexoError('not-available', 'The pretend band can only keep its storage in a file (storeFile) in Node. '
         + 'In a web page leave storeFile out: the storage then lives in memory.');
