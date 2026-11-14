@@ -13,6 +13,14 @@ from transit_speech import transit_speech
 from memory import Memory
 
 
+# Sentences that are clearly a request to the device, accepted without the wake word or a double tap.
+DIRECT_REQUEST = re.compile(
+    r"\bwhat(?:'s| is| kind of| type of)?\b.*\b(am i holding|in my hand|in front of me|around me|am i looking at)\b"
+    r"|\bis (this|it) (what|the one|the right)\b"
+    r"|\b(where|find|show me)\b.*\b(exit|way out|door)\b|\bi (want|need) to (leave|get out|go out)\b"
+    r"|\b(read|scan)\b.*\b(label|price|sign)\b"
+    r"|\bwhat did\b.*\b(want|ask|say|tell)\b", re.I)
+
 class Coordinator:
     def __init__(self, providers):
         self.providers = providers
@@ -20,6 +28,12 @@ class Coordinator:
         directory.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(directory / 'backend.sqlite')
         self.db.execute('CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, data TEXT)')
+        # Full session logs: one JSONL file per session, never trimmed (the events table keeps only 300).
+        # A session starts when the server starts and again whenever a relay connects after both were away.
+        self.log_dir = directory / 'sessions'
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.session_file = None
+        self.new_session('server start')
         self.clients = {}
         self.tasks = set()
         self.voice = None
@@ -52,8 +66,20 @@ class Coordinator:
         missing.extend(key for key in required if not os.getenv(key))
         return missing
 
+    def new_session(self, why):
+        name = datetime.now().strftime('%Y-%m-%d_%H-%M-%S') + '.jsonl'
+        self.session_file = self.log_dir / name
+        with open(self.session_file, 'a') as f:
+            f.write(json.dumps({'ts': round(time.time() * 1000), 'agent': 'Session', 'event': 'started', 'detail': why}) + '\n')
+
     def log(self, agent, event, detail, **extra):
         row = {'ts': round(time.time() * 1000), 'agent': agent, 'event': event, 'detail': detail, **extra}
+        if agent == 'Transport' and event == 'connected' and len(self.clients) <= 1 \
+                and self.session_file and self.session_file.stat().st_size > 400:
+            self.new_session(f'{detail} relay connected')
+        try:
+            with open(self.session_file, 'a') as f: f.write(json.dumps(row, default=str) + '\n')
+        except OSError: pass
         self.db.execute('INSERT INTO events(data) VALUES(?)', (json.dumps(row),))
         self.db.execute('DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 300)')
         self.db.commit()
@@ -124,7 +150,15 @@ class Coordinator:
         if source == 'band':
             addressed = re.match(r'^(?:hey\s+)?second\s*vision[\s,:]+(.+)$', text, re.I)
             if addressed: text = addressed[1]
-            elif os.getenv('REQUIRE_WAKE_WORD', '0') == '1' and time.monotonic() > self.listen_until: return
+            elif os.getenv('REQUIRE_WAKE_WORD', '0') == '1' and time.monotonic() > self.listen_until:
+                # Not addressed and no double tap: only a sentence that is plainly a request to the glasses
+                # gets through (the last sentence of the transcript, so chatter before it is dropped).
+                sentences = [part.strip() for part in re.split(r'(?<=[.?!])\s+', text) if part.strip()]
+                request = next((part for part in reversed(sentences[-2:]) if DIRECT_REQUEST.search(part)), None)
+                if not request:
+                    self.log('Coordinator', 'ignored', 'Not addressed to the device (say "Second Vision" or double-tap).')
+                    return
+                text = request
         self.plan_version += 1
         self.spawn(self.plan(text, self.plan_version))
 

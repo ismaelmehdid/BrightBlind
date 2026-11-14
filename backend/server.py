@@ -91,6 +91,17 @@ def make_app(providers=None):
         await app.state.coordinator.voice.question(body.text)
         return {'accepted': True, 'path': 'pipecat → planner → glasses'}
 
+    @app.get('/api/sessions')
+    async def sessions():
+        files = sorted(app.state.coordinator.log_dir.glob('*.jsonl'), reverse=True)
+        return [{'name': f.name, 'bytes': f.stat().st_size} for f in files[:200]]
+
+    @app.get('/api/sessions/{name}')
+    async def session(name: str):
+        path = app.state.coordinator.log_dir / name
+        if '/' in name or '..' in name or not path.is_file(): return JSONResponse({'detail': 'No such session'}, status_code=404)
+        return FileResponse(path, media_type='application/x-ndjson')
+
     @app.post('/api/stop')
     async def stop():
         await app.state.coordinator.stop()
