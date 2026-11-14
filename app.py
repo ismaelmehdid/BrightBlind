@@ -40,6 +40,8 @@ def parse_args():
     p.add_argument("--port", help="serial port of the band, e.g. COM5")
     p.add_argument("--sim", action="store_true", help="pretend band, no hardware")
     p.add_argument("--sim-voice", action="store_true", help="pretend band plays the kit's sample speech")
+    p.add_argument("--phone-band", action="store_true",
+                   help="do not look for the band here: the Expo app connects it and relays it to /band")
     p.add_argument("--web-port", type=int, default=8100)
     p.add_argument("--db", default=str(ROOT / "recall.db"))
     p.add_argument("--backend", default=os.getenv("BACKEND_WS_URL"),
@@ -113,6 +115,9 @@ async def main():
     glasses = Glasses(recall)
     recall.glasses = glasses
     recall.eyes = Eyes(recall)              # transcript -> burst on/off, burst photos -> spoken directions
+    from recall.phoneband import PhoneBand, PhoneBandOnly
+
+    phoneband = PhoneBand(recall)           # /band: the Expo app relays the band from the phone
     token = os.getenv("RECALL_TOKEN") or None
     if args.tunnel and not token:
         import secrets
@@ -122,7 +127,7 @@ async def main():
         raise SystemExit("RECALL_TOKEN must be 16 characters or more")
 
     runner = await web.start(recall, {"tap": tap, "double-tap": double_tap}, args.web_port,
-                             glasses=glasses, token=token)
+                             glasses=glasses, token=token, phoneband=phoneband)
     suffix = f"?token={token}" if token else ""
     print(f"Open http://localhost:{args.web_port}/{suffix}")
     if not args.tunnel:
@@ -136,6 +141,7 @@ async def main():
             tunnel_proc, public = await start_tunnel(args.web_port)
             print("Public address (anyone with the token can read the memory):", f"{public}/{suffix}")
             print("Type this into the glasses app:", public.replace("https://", "wss://") + "/glasses" + suffix)
+            print("Band from the phone (Expo app):", public.replace("https://", "wss://") + "/band" + suffix)
         except Exception as e:
             print("Tunnel not started:", e)
 
@@ -145,6 +151,7 @@ async def main():
 
         voice = Voice(recall)
         recall.ctx["voice"] = True
+        phoneband.voice = voice
     else:
         print("Voice off: no DEEPGRAM_API_KEY in .env. Typed notes and questions still work.")
 
@@ -183,6 +190,11 @@ async def main():
     try:
         told = False
         while True:                           # Bluetooth: keep looking until the band advertises (double-tap)
+            if args.phone_band:
+                raise PhoneBandOnly
+            if phoneband.connected:           # the phone holds the band: one link at a time, never take it
+                await asyncio.sleep(3)
+                continue
             try:
                 band = await connect_band(args)
                 break
@@ -261,6 +273,8 @@ async def main():
             await band.configure(audio=True)  # solid blue light: mic on, LED locked
             recall.ctx["mic"] = True
         await recall.push_ctx()
+    except PhoneBandOnly:
+        print("Phone band: not looking for the band here; the Expo app relays it to /band")
     except Exception as e:  # a band problem: keep the page up so typed notes still work
         print("Band not connected:", getattr(e, "message", None) or e)
         recall.ctx["connected"] = False

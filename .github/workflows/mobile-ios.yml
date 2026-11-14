@@ -1,0 +1,149 @@
+name: Mobile (Expo) iOS (unsigned IPA)
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/mobile-ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: mobile
+
+env:
+  CI: "1"                     # non-interactive expo prebuild
+  EXPO_NO_TELEMETRY: "1"
+  # The app keeps the native app's bundle id on purpose so the paid-team profile signs it.
+  BUNDLE_ID: com.andriidrok.secondvision
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode 26
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Fetch Meta DAT xcframeworks
+        run: |
+          if [ -f modules/meta-glasses/fetch-sdk.sh ]; then
+            bash modules/meta-glasses/fetch-sdk.sh
+            ls -la modules/meta-glasses/ios/Frameworks || true
+          else
+            echo "no modules/meta-glasses/fetch-sdk.sh, skipping"
+          fi
+
+      # prebuild refuses to run non-interactively without ios.bundleIdentifier; set it in the CI
+      # checkout only if app.json does not already define one.
+      - name: Ensure ios.bundleIdentifier
+        run: |
+          node -e '
+            const fs = require("fs");
+            const j = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            j.expo.ios = j.expo.ios || {};
+            if (!j.expo.ios.bundleIdentifier) {
+              j.expo.ios.bundleIdentifier = process.env.BUNDLE_ID;
+              fs.writeFileSync("app.json", JSON.stringify(j, null, 2) + "\n");
+              console.log("set ios.bundleIdentifier =", process.env.BUNDLE_ID);
+            } else {
+              console.log("ios.bundleIdentifier =", j.expo.ios.bundleIdentifier);
+            }'
+
+      - name: expo prebuild (iOS)
+        run: npx expo prebuild -p ios --clean --no-install
+
+      - name: Pin Node for Xcode script phases
+        run: |
+          # Bundle React Native code and images + Hermes phases source ios/.xcode.env(.local).
+          echo "export NODE_BINARY=$(command -v node)" > ios/.xcode.env.local
+          cat ios/.xcode.env.local
+
+      - name: pod install
+        working-directory: mobile/ios
+        run: |
+          pod --version || brew install cocoapods
+          pod install
+
+      - name: Archive (unsigned, Release)
+        run: |
+          set -o pipefail
+          WS=$(find ios -maxdepth 1 -name "*.xcworkspace" | head -1)
+          test -n "$WS"
+          SCHEME=$(basename "$WS" .xcworkspace)
+          echo "workspace=$WS scheme=$SCHEME"
+          xcodebuild -list -workspace "$WS" | tee build-schemes.log
+          xcodebuild archive \
+            -workspace "$WS" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/BrightBlind.xcarchive \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            2>&1 | tee build.log | grep -E "error:|warning: .*(Run script|bundle)|ARCHIVE|BUILD" || true
+          grep -q "ARCHIVE SUCCEEDED" build.log
+
+      - name: Package IPA
+        run: |
+          APP=$(find build/BrightBlind.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -1)
+          test -n "$APP"
+          echo "app=$APP"
+          # Release must embed the JS bundle, otherwise the app needs Metro and is useless on the street.
+          test -f "$APP/main.jsbundle" || { echo "main.jsbundle missing from $APP"; ls -la "$APP"; exit 1; }
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          ls "$APP/Frameworks" || true
+          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+          zip -qr BrightBlind-wifi.ipa Payload
+          ls -la BrightBlind-wifi.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: BrightBlind-ipa
+          path: mobile/BrightBlind-wifi.ipa
+
+      - name: Publish rolling "mobile-latest" release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view mobile-latest >/dev/null 2>&1 || \
+            gh release create mobile-latest --title "Mobile (Expo) app, latest unsigned IPA" --notes "Rolling build of mobile/ from main. Sign and install with mobile/scripts/install-team.sh." --prerelease
+          gh release upload mobile-latest BrightBlind-wifi.ipa --clobber
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-build-logs
+          path: |
+            mobile/build*.log
+            mobile/ios/Podfile.lock
+            mobile/ios/Pods/Manifest.lock

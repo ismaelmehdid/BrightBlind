@@ -1,6 +1,7 @@
-// BrightBlind control app: the band, the Meta glasses and every agent on one phone screen.
+// BrightBlind: the band, the Meta glasses and every agent on one phone screen.
 // Talks to Recall (laptop, /ws: band, glasses, Watcher, Guide, Memory) and, when set, reads the team
-// backend's /api/state (Planner, Vision, Transit). Runs in Expo Go: no native modules.
+// backend's /api/state (Planner, Vision, Transit). In the iOS build this phone is also the glasses relay
+// (modules/meta-glasses, Meta DAT SDK) and the band's Bluetooth link; in Expo Go those cards only show status.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,6 +9,8 @@ import {
   Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useBand } from './src/bandRelay';
+import { useGlasses } from './src/glassesRelay';
 
 type Ctx = Record<string, any>;
 type Step = { ts: number; agent: string; state: string; detail: string; from: 'recall' | 'backend' };
@@ -191,6 +194,8 @@ function Main() {
 
   const recall = useRecall(settings);
   const backend = useBackend(settings);
+  const phone = useGlasses(settings.recallUrl, settings.recallToken);  // native build only (available)
+  const phoneBand = useBand(settings.recallUrl, settings.recallToken); // band over this phone's Bluetooth
   const { ctx } = recall;
 
   const steps = useMemo(() => [...recall.steps, ...backend.steps].sort((a, b) => b.ts - a.ts).slice(0, 60),
@@ -220,13 +225,23 @@ function Main() {
         <View style={st.cards}>
           <DeviceCard title="Vexo band" color={bandUp ? C.ok : C.bad}
             status={bandUp ? `${ctx.band ?? 'connected'}` : recall.up ? 'not connected to the laptop' : 'Recall offline'}
-            rows={bandUp ? [`${ctx.activity ?? '–'} · ${ctx.steps ?? 0} steps`, `battery ${ctx.battery ?? '–'}% · mic ${ctx.mic ? 'on' : 'off'}`] : []}>
+            rows={[...(bandUp ? [`${ctx.activity ?? '–'} · ${ctx.steps ?? 0} steps`, `battery ${ctx.battery ?? '–'}% · mic ${ctx.mic ? 'on' : 'off'}`] : []),
+              Platform.OS === 'ios' && phone.available ? `this phone: ${phoneBand.state}${phoneBand.socket !== 'off' ? ` · link ${phoneBand.socket}` : ''}${phoneBand.error ? ` · ${phoneBand.error}` : ''}` : '']}>
+            {Platform.OS === 'ios' && phone.available ? (phoneBand.state === 'idle' || phoneBand.state === 'error'
+              ? <Btn label="Connect band" tone="go" onPress={() => phoneBand.connect()} />
+              : <Btn label="Disconnect" onPress={() => phoneBand.disconnect()} />) : null}
             <Btn label="Tap" onPress={() => recall.send({ cmd: 'tap' })} disabled={!recall.up} />
             <Btn label="Double-tap" onPress={() => recall.send({ cmd: 'double-tap' })} disabled={!recall.up} />
           </DeviceCard>
           <DeviceCard title="Meta glasses" color={glassesUp ? (glassesState === 'streaming' ? C.burst : C.ok) : C.bad}
-            status={glassesUp ? glassesState : 'open SecondVision on the phone'}
-            rows={[goal ? `burst on: ${goal}` : 'burst off']}>
+            status={glassesUp ? glassesState : phone.available ? `this phone: ${phone.glasses}` : 'open SecondVision on the phone'}
+            rows={[goal ? `burst on: ${goal}` : 'burst off',
+              phone.available ? `link to Recall: ${phone.link}` : '']}>
+            {phone.available && phone.glasses === 'disconnected' ? <>
+              <Btn label="Register" onPress={() => phone.register()} />
+              <Btn label="Camera" onPress={() => phone.requestCameraPermission()} />
+              <Btn label="Connect" tone="go" onPress={() => phone.connect()} />
+            </> : null}
             <Btn label="Photo" onPress={() => recall.send({ cmd: 'capture' })} disabled={!glassesUp} />
             <Btn label="Test voice" onPress={() => recall.send({ cmd: 'say', text: 'BrightBlind is ready.' })} disabled={!recall.up} />
           </DeviceCard>

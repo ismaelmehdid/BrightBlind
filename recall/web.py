@@ -32,9 +32,10 @@ def token_middleware(token, open_paths=()):
     return check
 
 
-def make_app(recall, band_actions, glasses=None, token=None):
+def make_app(recall, band_actions, glasses=None, token=None, phoneband=None):
     """band_actions: dict of async callables the page may trigger (tap, double-tap).
-    glasses: a recall.glasses.Glasses, served at /glasses for Andrii's phone app. token: guard every path."""
+    glasses: a recall.glasses.Glasses, served at /glasses for Andrii's phone app. token: guard every path.
+    phoneband: a recall.phoneband.PhoneBand, served at /band for the Expo app relaying the band."""
     app = web.Application(middlewares=[token_middleware(token)] if token else [])
 
     async def index(_req):
@@ -147,11 +148,13 @@ def make_app(recall, band_actions, glasses=None, token=None):
     app.router.add_static("/photos/", PHOTOS)
     if glasses is not None:
         app.router.add_get("/glasses", glasses.handler)
+    if phoneband is not None:
+        app.router.add_get("/band", phoneband.handler)
     return app
 
 
-async def start(recall, band_actions, port, glasses=None, token=None):
-    runner = web.AppRunner(make_app(recall, band_actions, glasses=glasses, token=token))
+async def start(recall, band_actions, port, glasses=None, token=None, phoneband=None):
+    runner = web.AppRunner(make_app(recall, band_actions, glasses=glasses, token=token, phoneband=phoneband))
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", port).start()
     return runner

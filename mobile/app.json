@@ -7,7 +7,61 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.andriidrok.secondvision",
+      "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleTypeRole": "Editor",
+            "CFBundleURLName": "com.andriidrok.secondvision",
+            "CFBundleURLSchemes": [
+              "secondvision"
+            ]
+          }
+        ],
+        "MWDAT": {
+          "AppLinkURLScheme": "secondvision://",
+          "MetaAppID": "",
+          "ClientToken": "",
+          "TeamID": "",
+          "Analytics": {
+            "OptOut": true
+          },
+          "CrashReporting": {
+            "OptOut": true
+          }
+        },
+        "UIBackgroundModes": [
+          "audio",
+          "processing",
+          "bluetooth-central",
+          "bluetooth-peripheral",
+          "external-accessory"
+        ],
+        "UISupportedExternalAccessoryProtocols": [
+          "com.meta.ar.wearable"
+        ],
+        "NSBluetoothAlwaysUsageDescription": "Connects to your Ray-Ban Meta glasses and your Vexo band.",
+        "NSBluetoothPeripheralUsageDescription": "Connects to your Ray-Ban Meta glasses.",
+        "NSLocalNetworkUsageDescription": "Needed to stream video from the glasses over Wi-Fi.",
+        "NSBonjourServices": [
+          "_bonjour._tcp"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true,
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSCameraUsageDescription": "Used only by the glasses SDK mock device when no glasses are paired.",
+        "UIRequiredDeviceCapabilities": [
+          "arm64"
+        ]
+      },
+      "entitlements": {
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.andriidrok.secondvision"
+        ],
+        "com.apple.developer.networking.HotspotConfiguration": true
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -20,6 +74,26 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "17.2"
+          }
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "BrightBlind connects to your Vexo band."
+        }
+      ]
+    ]
   }
 }
