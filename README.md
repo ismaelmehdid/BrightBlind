@@ -140,6 +140,16 @@ docs/        all      contract.md (this table, kept in sync), demo script, judgi
 
 Stay in your folder. The only shared file is the contract table above (mirrored in `docs/contract.md`). If you change it, say so in the team chat.
 
+## Team board
+
+One pinned issue is the board: https://github.com/ismaelmehdid/SecondVision/issues/2. Post before you touch another folder or the contract table; address with `@ios`, `@backend`, `@band`.
+
+    tools/board post "@backend contract: photo now carries req_id"
+    tools/board unread        # new posts since you last read
+    tools/board wait          # keep in a terminal, prints new posts every 30 s
+
+Needs `gh auth login` and collaborator access to the repo. The script is 40 lines of bash over `gh`, written today.
+
 ## Rules we must not break
 
 - All code written after 9:00 AM today. Scaffolding copied from a public repo must be named in the README (done above for `ios/`).
@@ -162,6 +172,8 @@ Stay in your folder. The only shared file is the contract table above (mirrored 
 ## For AI coding agents
 
 If a teammate pointed you at this file, you are working on one of the three parts. Before you write code:
+
+0. Run `tools/board unread` and read what the other two posted. Before you change the WebSocket contract or anything outside your folder, post on the board (`tools/board post "@who ..."`) and wait for the human to say go.
 
 1. Ask which role you are helping: `band/` (Ismaël), `backend/` (Tarang) or `ios/` (Andrii). Work only inside that folder.
 2. Read the WebSocket contract above. Your code must send and accept exactly those message types. Do not invent new ones silently; if one is missing, add it to the table in `docs/contract.md` and tell the human.

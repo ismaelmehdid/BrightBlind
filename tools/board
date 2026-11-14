@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Team board = one pinned GitHub issue. Posts are comments. Address people/agents with @ios, @backend, @band.
+#   tools/board post "@backend contract: photo now carries req_id"   write a comment
+#   tools/board unread                                               comments since you last read (marks them read)
+#   tools/board wait                                                 poll every 30 s, print new comments as they land
+#   tools/board show [N]                                             last N comments (default 20), does not mark read
+# Needs gh (logged in, collaborator on the repo). Board issue number: BOARD_ISSUE env, else .board-issue file, else 1.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+ISSUE="${BOARD_ISSUE:-$(cat .board-issue 2>/dev/null || echo 1)}"
+SEEN=".board-seen"            # ISO timestamp of the newest comment you have read (gitignored)
+ME="$(gh api user -q .login)"
+
+comments() {  # all comments as "created_at<TAB>author<TAB>body(one line)"
+  gh api "repos/$REPO/issues/$ISSUE/comments?per_page=100" --paginate \
+    -q '.[] | [.created_at, .user.login, (.body | gsub("\r";"") | gsub("\n";" ⏎ "))] | @tsv'
+}
+
+print_rows() { awk -F'\t' '{ printf "%s  %-12s %s\n", substr($1,12,5), "@"$2, $3 }'; }
+
+case "${1:-}" in
+  post)
+    shift; MSG="${*:-}"; [ -n "$MSG" ] || { echo "usage: tools/board post \"@who message\""; exit 1; }
+    gh issue comment "$ISSUE" -R "$REPO" -b "$MSG" >/dev/null && echo "posted to #$ISSUE as @$ME"
+    ;;
+  unread)
+    LAST="$(cat "$SEEN" 2>/dev/null || echo 1970-01-01T00:00:00Z)"
+    ROWS="$(comments | awk -F'\t' -v last="$LAST" '$1 > last')"
+    if [ -z "$ROWS" ]; then echo "board #$ISSUE: nothing new"; else echo "$ROWS" | print_rows; echo "$ROWS" | tail -1 | cut -f1 > "$SEEN"; fi
+    ;;
+  wait)
+    echo "watching board #$ISSUE every 30 s (Ctrl+C to stop)"
+    while true; do "$0" unread | grep -v "nothing new" || true; sleep 30; done
+    ;;
+  show)
+    comments | tail -n "${2:-20}" | print_rows
+    ;;
+  *)
+    sed -n 2,7p "$0"; exit 1
+    ;;
+esac

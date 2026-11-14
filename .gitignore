@@ -13,3 +13,4 @@ recording.wav
 .venv/
 recall.db
 recall.db-*
+.board-seen
