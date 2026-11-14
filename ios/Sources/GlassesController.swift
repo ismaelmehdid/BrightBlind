@@ -56,6 +56,8 @@ final class GlassesController: ObservableObject {
     /// Photo has no `state` getter, only a publisher: mirror it here.
     private var shutterState: PhotoState = .stopped
     private var photoStartRequested = false
+    private var cameraAlive = false
+    private var streamRetries = 0
     private var wakeStreamReleased = false
     private var pendingReqId: String?
     private var captureStarted: Date?
@@ -266,9 +268,10 @@ final class GlassesController: ObservableObject {
                     if self.desiredMode == .photo { self.releaseWakeStream() }
                 case .stopped:
                     self.photoStartRequested = false
-                    if self.desiredMode == .stream, let camera = self.camera, camera.stream.state == .stopped {
-                        self.log("shutter down, starting stream")
-                        camera.stream.start()
+                    if self.desiredMode == .stream {
+                        // Starting the stream in the same instant fails with videoStreamingError: let the sensor settle.
+                        self.log("shutter down, starting stream in 1.5 s")
+                        self.startStreamSoon(after: 1.5)
                     }
                 default: break
                 }
@@ -303,8 +306,23 @@ final class GlassesController: ObservableObject {
             }
         }.store(in: sessionTokens)
 
+        cameraAlive = true
         cam.statePublisher.listen { [weak self] state in
-            Task { @MainActor in self?.log("camera: \(state)") }
+            Task { @MainActor in
+                guard let self else { return }
+                self.log("camera: \(state)")
+                if state == .stopped, self.camera === cam {
+                    self.cameraAlive = false
+                    // Photo mode with a dead camera: bring it back so captures keep working.
+                    if self.desiredMode == .photo, let s = self.session {
+                        self.log("camera stopped in photo mode, re-attaching")
+                        self.camera = nil
+                        self.photoStartRequested = false
+                        self.wakeStreamReleased = false
+                        self.attachCamera(s)
+                    }
+                }
+            }
         }.store(in: sessionTokens)
 
         // Stream (Wi-Fi path; also used once at start to wake the sensor).
@@ -323,6 +341,7 @@ final class GlassesController: ObservableObject {
                         self.startPhotoIfNeeded()      // then photo .started → releaseWakeStream
                     } else {
                         self.mode = .stream
+                        self.streamRetries = 0
                     }
                 case .stopped:
                     if self.desiredMode == .photo, self.wakeStreamReleased {
@@ -335,7 +354,20 @@ final class GlassesController: ObservableObject {
         }.store(in: sessionTokens)
 
         stream.errorPublisher.listen { [weak self] error in
-            Task { @MainActor in self?.log("stream error: \(error)") }
+            Task { @MainActor in
+                guard let self else { return }
+                self.log("stream error: \(error)")
+                guard self.desiredMode == .stream else { return }
+                if self.streamRetries < 3 {
+                    self.streamRetries += 1
+                    self.log("stream retry \(self.streamRetries)/3 in 2 s")
+                    self.startStreamSoon(after: 2)
+                } else {
+                    self.log("stream gave up, back to photo mode")
+                    self.streamRetries = 0
+                    self.setStreaming(false, fps: nil)
+                }
+            }
         }.store(in: sessionTokens)
 
         stream.photoDataPublisher.listen { [weak self] photo in
@@ -361,7 +393,10 @@ final class GlassesController: ObservableObject {
     nonisolated private func handleFrame(_ frame: VideoFrame) {
         frameQueue.async { [weak self] in
             guard let self else { return }
-            Task { @MainActor in self.framesSeen += 1 }
+            Task { @MainActor in
+                self.framesSeen += 1
+                if self.framesSeen == 1 || self.framesSeen % 50 == 0 { self.log("frames seen: \(self.framesSeen)") }
+            }
             let now = Date()
             let interval = 1.0 / max(0.2, self.sendFpsSnapshot())
             guard now.timeIntervalSince(self.lastFrameSentUnsafe) >= interval else { return }
@@ -382,6 +417,23 @@ final class GlassesController: ObservableObject {
     nonisolated(unsafe) private var frameSeqUnsafe = 0
     nonisolated(unsafe) private var sendFpsUnsafe: Double = 1.0
     nonisolated private func sendFpsSnapshot() -> Double { sendFpsUnsafe }
+
+    /// Start (or restart) the stream after a pause. A stream error stops the whole Camera object,
+    /// so when that happened a new one is attached to the session.
+    private func startStreamSoon(after seconds: Double) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard let self, self.desiredMode == .stream, let s = self.session else { return }
+            if let camera = self.camera, self.cameraAlive {
+                if camera.stream.state == .stopped { camera.stream.start() }
+            } else {
+                self.log("camera is down, attaching a new one")
+                self.camera = nil
+                self.photoStartRequested = false
+                self.attachCamera(s)
+            }
+        }
+    }
 
     private func startPhotoIfNeeded() {
         guard !photoStartRequested, let camera else { return }
