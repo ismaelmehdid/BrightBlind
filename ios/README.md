@@ -17,9 +17,15 @@ runner and publishes two unsigned IPAs to the rolling release `ios-latest`:
 - `SecondVision-ble.ipa`: no extra entitlements. Photos over Bluetooth only. Fallback if the
   signing account refuses the entitlement.
 
-Install from Linux with a free Apple ID (profile lasts 7 days):
+Install from Linux. A free Apple ID cannot carry the Hotspot Configuration entitlement (checked
+2026-11-14: the profile omits it and the signer strips it), so the streaming build is signed with a
+paid-team development certificate and profile instead:
 
-    ios/scripts/install.sh wifi      # or: ios/scripts/install.sh ble
+    ios/scripts/install-team.sh      # wifi build, team-signed, profile valid one year
+
+Fallback with a free Apple ID (7-day profile, photos over Bluetooth only):
+
+    ios/scripts/install.sh ble
 
 ## First run on the phone
 
