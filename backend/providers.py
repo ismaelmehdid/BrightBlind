@@ -170,7 +170,6 @@ class Providers:
         else:
             result['description'] = str(result.get('description', 'The view is unclear.'))[:600]
             # Do not turn generative visual text into physical control instructions.
-            import re
             if re.search(r'\b(step|walk|cross|reach|grab|board|move your hand|go around|turn left|turn right)\b', result['description'], re.I):
                 result['description'] = 'Visible in the image: ' + ', '.join(result['visible']) + '. I cannot confirm safe movement from this view.'
         return result
