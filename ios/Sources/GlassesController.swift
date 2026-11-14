@@ -247,8 +247,8 @@ final class GlassesController: ObservableObject {
             let status = try? await Wearables.shared.checkPermissionStatus(.camera)
             await MainActor.run { self?.log("camera permission status: \(status.map { String(describing: $0) } ?? "unreadable")") }
         }
-        // raw = decoded pixel buffers (app stays in the foreground anyway); medium = 504x896.
-        let config = StreamConfiguration(videoCodec: .raw, resolution: .medium, frameRate: 7)
+        // raw = decoded pixel buffers (app stays in the foreground anyway); high = 720x1280 (glasses may step down by themselves).
+        let config = StreamConfiguration(videoCodec: .raw, resolution: .high, frameRate: 7)
         guard let cam = try? s.addCamera(config: config) else {
             log("camera would not attach (camera permission granted in Meta AI?)")
             return
@@ -406,7 +406,7 @@ final class GlassesController: ObservableObject {
             let interval = 1.0 / max(0.2, self.sendFpsSnapshot())
             guard now.timeIntervalSince(self.lastFrameSentUnsafe) >= interval else { return }
             self.lastFrameSentUnsafe = now
-            guard let jpeg = image.jpegData(compressionQuality: 0.6) else { return }
+            guard let jpeg = image.jpegData(compressionQuality: 0.7) else { return }
             let w = Int(image.size.width * image.scale), h = Int(image.size.height * image.scale)
             self.frameSeqUnsafe += 1
             let seq = self.frameSeqUnsafe
