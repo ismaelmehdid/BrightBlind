@@ -96,8 +96,11 @@ async def main():
 
     from recall.glasses import Glasses
 
+    from recall.eyes import Eyes
+
     glasses = Glasses(recall)
     recall.glasses = glasses
+    recall.eyes = Eyes(recall)              # transcript -> burst on/off, burst photos -> spoken directions
     token = os.getenv("RECALL_TOKEN") or None
     if args.tunnel and not token:
         import secrets

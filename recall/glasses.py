@@ -4,13 +4,17 @@ Speaks the same messages as the team contract (README, "WebSocket contract"), wi
 backend's seat, so the app needs no change: give it this server's address, path /glasses.
 
   glasses -> Recall   hello, photo {jpeg_b64, req_id}, button {press}, state {glasses}
-  Recall -> glasses   say {text, audio_b64 (mp3, Deepgram voice), interrupt}, capture {req_id, quality}
+  glasses -> Recall   frame {jpeg_b64, seq} (stream frames, only used while a burst runs)
+  Recall -> glasses   say {text, audio_b64 (mp3, Deepgram voice), interrupt}, capture {req_id, quality},
+                      burst {on, fps} (the app's photo burst; GLASSES_BURST=stream sends stream {on, fps} instead)
 
 What it does:
 - Recall's spoken replies ("Saved.", answers) play in the glasses instead of the laptop speaker.
 - A tap on the band (or a short press on the glasses' button) also takes a photo; Gemini describes
   it and the description is kept as a bookmarked memory ("what was in my fridge?").
 - A double press on the glasses' button is the same as a double-tap on the band: ask a question.
+- While a burst runs (recall/eyes.py starts and stops it from the transcript), its photos go to the Guide,
+  which speaks directions toward the goal; they are not kept as memories.
 """
 import asyncio
 import base64
@@ -24,6 +28,8 @@ from aiohttp import WSMsgType, web
 
 PHOTOS = Path(__file__).resolve().parent.parent / "photos"
 VOICE = os.getenv("DEEPGRAM_VOICE", "aura-2-thalia-en")
+BURST = os.getenv("GLASSES_BURST", "burst")      # "stream": drive the stream instead (works before the burst ships)
+BURST_FPS = float(os.getenv("GLASSES_BURST_FPS", "1"))
 
 
 def _ms():
@@ -64,6 +70,11 @@ class Glasses:
     async def capture(self, why="tap"):
         return await self._send(type="capture", req_id=f"{why}-{_ms()}", quality="medium")
 
+    async def burst(self, on):
+        """Start or stop the app's photo burst. Its photos come back as photo (or frame) messages."""
+        kind = "stream" if BURST == "stream" else "burst"
+        return await self._send(type=kind, on=bool(on), fps=BURST_FPS)
+
     # --- glasses -> Recall -------------------------------------------------------------
 
     async def handler(self, req):
@@ -82,6 +93,8 @@ class Glasses:
             if self.ws is ws:
                 self.ws = None
                 self.state = None
+                if self.recall.eyes is not None:
+                    await self.recall.eyes.stop("glasses disconnected")
                 await self._push_ctx()
                 print("Glasses: disconnected")
         return ws
@@ -93,6 +106,8 @@ class Glasses:
             print("Glasses: connected, caps", m.get("caps"))
             await self._push_ctx()
             await self.say("Recall is connected.")
+        elif kind in ("photo", "frame") and m.get("jpeg_b64") and self._is_burst(m):
+            asyncio.create_task(self.recall.eyes.on_image(base64.b64decode(m["jpeg_b64"])))
         elif kind == "photo" and m.get("jpeg_b64"):
             jpeg = base64.b64decode(m["jpeg_b64"])
             name = f"{time.strftime('%Y%m%d-%H%M%S')}-{m.get('req_id') or 'photo'}.jpg"
@@ -108,6 +123,13 @@ class Glasses:
         elif kind == "state":
             self.state = m.get("glasses")
             await self._push_ctx()
+
+    def _is_burst(self, m):
+        """While a burst runs, every image but a tap's photo is a burst photo."""
+        eyes = self.recall.eyes
+        if eyes is None or not eyes.active:
+            return False
+        return m.get("type") == "frame" or not str(m.get("req_id") or "").startswith("tap-")
 
     async def _push_ctx(self):
         self.recall.ctx["glasses"] = self.state or ("connected" if self.connected else None)

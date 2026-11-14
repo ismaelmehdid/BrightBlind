@@ -91,6 +91,27 @@ class Brain:
             config.response_json_schema = schema
         return self.client.models.generate_content(model=MODEL, contents=text, config=config).text
 
+    def json(self, instructions, text, schema, jpeg=None, thinking="low"):
+        """One Gemini call that returns JSON text matching `schema`, optionally looking at a JPEG."""
+        if jpeg is None:
+            return self._generate(instructions, text, schema=schema, thinking=thinking)
+        import base64
+
+        if hasattr(self.client, "interactions"):
+            parts = [{"type": "text", "text": text},
+                     {"type": "image", "data": base64.b64encode(jpeg).decode(), "mime_type": "image/jpeg"}]
+            return self.client.interactions.create(
+                model=MODEL, system_instruction=instructions, input=parts,
+                generation_config={"thinking_level": thinking},
+                response_format={"type": "text", "mime_type": "application/json", "schema": schema}).output_text
+        from google.genai import types
+
+        config = types.GenerateContentConfig(system_instruction=instructions, response_mime_type="application/json",
+                                             response_json_schema=schema)
+        return self.client.models.generate_content(
+            model=MODEL, contents=[types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"), text],
+            config=config).text
+
     def describe_photo(self, jpeg):
         """A JPEG from the glasses -> a short description to keep as a memory."""
         import base64

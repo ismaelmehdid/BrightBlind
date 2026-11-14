@@ -23,6 +23,7 @@ class Recall:
         self.clients = set()                  # open web pages (aiohttp WebSocketResponse)
         self.speak = None                     # async fn(text), set by the voice pipeline when it runs
         self.glasses = None                   # recall.glasses.Glasses: voice and camera when the phone is connected
+        self.eyes = None                      # recall.eyes.Eyes: starts/stops the glasses' burst from the transcript
         self.mirror = None                    # recall.mirror.Mirror: copies lines and taps to the Recall on Railway
         # With the team backend connected, it owns the conversation (double-tap, speech in the glasses) and
         # asks Recall over /ws when a question is about memory. Recall then stays silent and only remembers.
@@ -137,6 +138,8 @@ class Recall:
         if self.mirror is not None:
             self.mirror.utterance(u)
         await self.broadcast("utterance", u)
+        if self.eyes is not None and not self.defer_to_backend:
+            await self.eyes.heard(text)
 
     async def from_mirror(self, item):
         """On the Railway side: a line or a tap copied from the laptop (recall/mirror.py)."""
