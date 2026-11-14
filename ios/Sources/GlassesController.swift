@@ -52,6 +52,8 @@ final class GlassesController: ObservableObject {
 
     /// What the backend wants right now; the state handlers steer the hardware towards it.
     private var desiredMode: CameraMode = .photo
+    /// Photo has no `state` getter, only a publisher: mirror it here.
+    private var shutterState: PhotoState = .stopped
     private var photoStartRequested = false
     private var wakeStreamReleased = false
     private var pendingReqId: String?
@@ -250,6 +252,7 @@ final class GlassesController: ObservableObject {
         photo.statePublisher.listen { [weak self] state in
             Task { @MainActor in
                 guard let self else { return }
+                self.shutterState = state
                 self.photoState = String(describing: state)
                 self.log("photo: \(state)")
                 self.onState?()
@@ -404,7 +407,7 @@ final class GlassesController: ObservableObject {
             desiredMode = .stream
             wakeStreamReleased = true          // whatever happens next, the stream is wanted for real
             if camera.stream.state == .streaming { mode = .stream; return }
-            if camera.photo.state == .started || camera.photo.state == .starting {
+            if shutterState == .started || shutterState == .starting {
                 log("stream on: stopping the standalone shutter first")
                 camera.photo.stop()            // photo .stopped → stream.start()
             } else if camera.stream.state == .stopped {
@@ -440,7 +443,7 @@ final class GlassesController: ObservableObject {
             if !ok { photoInFlight = false; pendingReqId = nil }
             return
         }
-        guard camera.photo.state == .started else {
+        guard shutterState == .started else {
             log("capture asked, but the shutter is not ready (photo=\(photoState), stream=\(streamState))")
             photoInFlight = false
             pendingReqId = nil
