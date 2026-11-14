@@ -10,7 +10,7 @@
 set -euo pipefail
 
 PLUMESIGN="${PLUMESIGN:-$HOME/Applications/impactor/plumesign-linux-x86_64}"
-REPO="ismaelmehdid/SecondVision"
+REPO="ismaelmehdid/BrightBlind"
 VARIANT="${1:-wifi}"
 TAG="${2:-ios-latest}"
 WORK="$(mktemp -d)"
