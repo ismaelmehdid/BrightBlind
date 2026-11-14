@@ -66,6 +66,18 @@ async def connect_band(args):
     if args.usb:
         options = {"port": args.port} if args.port else {}
         return await Band.connect(BAND, transport="serial", **options)
+    if sys.platform == "win32":
+        # Pipecat's audio stack puts this thread in Windows GUI mode (COM STA); bleak then gets no
+        # Bluetooth callbacks ("Thread is configured for Windows GUI but callbacks are not working").
+        from bleak.backends.winrt.util import _AptType, _get_apartment_type, uninitialize_sta
+
+        for _ in range(8):                    # COM counts each CoInitialize: undo them all
+            try:
+                if _get_apartment_type()[0] == _AptType.MTA:
+                    break
+            except OSError:                   # not initialized any more: WinRT will set MTA itself
+                break
+            uninitialize_sta()
     return await Band.connect(BAND, auto_reconnect=True)  # fails with "wrong-band" if another band answers
 
 
@@ -169,7 +181,18 @@ async def main():
         print("Backend relay: forwarding band audio, taps and activity to", relay.where)
 
     try:
-        band = await connect_band(args)
+        told = False
+        while True:                           # Bluetooth: keep looking until the band advertises (double-tap)
+            try:
+                band = await connect_band(args)
+                break
+            except Exception as e:
+                if args.sim or args.usb:
+                    raise
+                if not told:
+                    print("Band not found yet, still looking (double-tap it):", getattr(e, "message", None) or e)
+                    told = True
+                await asyncio.sleep(3)
         print("Connected to", band.name)
         recall.ctx.update(connected=True, band=band.name)
         store.add_event("connect", band.name)
