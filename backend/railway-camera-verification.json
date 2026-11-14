@@ -1,0 +1,13 @@
+{
+  "date": "2026-11-14",
+  "server": "https://backend-production-902365d4.up.railway.app",
+  "typed_request_to_glasses_photo": true,
+  "gemini_observation": true,
+  "deepgram_audio_sent_to_glasses_relay": true,
+  "band_connected": false,
+  "thinking_level": "LOW",
+  "request_to_observation_ms": 5771,
+  "request_to_audio_sent_ms": 10765,
+  "credit_deduction_verified": false,
+  "caption_and_image_omitted": true
+}
