@@ -140,6 +140,22 @@ docs/        all      contract.md (this table, kept in sync), demo script, judgi
 
 Stay in your folder. The only shared file is the contract table above (mirrored in `docs/contract.md`). If you change it, say so in the team chat.
 
+## How we work today (the pipeline)
+
+Six stages, adapted from Andrii's hackathon pipeline (Notion: "Universal pipeline for hackathon"). Stages 1–3 are done and live in this file; 4–6 are what the rest of the day looks like.
+
+1. **Idea.** Done: SecondVision, three demo scenes above. Everything is built backwards from the 2-minute demo. If a feature is not in a scene, it does not get built.
+2. **Explain it to the agent.** Done: this README is the explanation. Every new agent session starts by reading it; if the agent's summary of the project does not match yours, fix the README, not the agent.
+3. **Architecture.** Done: two hubs, one backend, one WebSocket contract. `README.md` plays the role of `PLAN.md`. A feature that needs a new message type goes through the contract table and the board first.
+4. **Ready-made components.** Nobody styles buttons today. The judges' dashboard (`backend/`) is shadcn/ui for the base, Magic UI or Aceternity for the first screen. Band code comes from `vexo-open-kit` examples. The glasses session is copied from Andrii's public scaffold.
+   Prompt: `Build the UI with shadcn/ui. For the first screen use Magic UI / Aceternity components. Don't write styles from scratch if an existing component already does the job.`
+5. **Building.** Three agents in parallel, one per folder, because the slices do not share files (`band/`, `backend/`, `ios/`). The one shared thing is the contract table; changes to it go on the board. After every step the human opens the result and checks it, no "done" on trust. Before a merge into `main`, run a reviewer agent that did not write the code:
+   `You didn't write this code. Go through <folder/feature> and find bugs, broken flows and anything that will break during the demo. Don't fix anything, give me a list with file and line.`
+6. **Presentation.** Feature freeze at 17:00. After that only: bugs visible in the demo flow, the backup video, the pitch (problem, solution, live demo, what's next), two full dry runs out loud.
+   Prompt at 17:00: `Submission is in one hour. We're not adding features. Help me with: 1) bugs visible in the demo flow, by priority; 2) a structure for a 3-minute pitch; 3) a step-by-step script for recording the demo video.`
+
+Two habits from the pipeline that pay off most here: walk up to the judges and sponsors and ask what they want to see (Vexo, Mastra and Pipecat people are in the room), and decide the demo before building anything.
+
 ## Team board
 
 One pinned issue is the board: https://github.com/ismaelmehdid/SecondVision/issues/2. Post before you touch another folder or the contract table; address with `@ios`, `@backend`, `@band`.
@@ -165,7 +181,8 @@ Needs `gh auth login` and collaborator access to the repo. The script is 40 line
 | 13:00 | Glasses relay: `capture` and `say` work end to end. Band relay: audio and taps reach the backend. |
 | 14:00 | Backend: typed question → spoken answer in the glasses. First full loop: say "what is in front of me", hear the answer. |
 | 15:00 | Fridge scene works. Streaming from the glasses works (or BLE photo fallback decided). |
-| 16:00 | Bus and shelf scenes. Feature freeze. |
+| 16:00 | Bus and shelf scenes. |
+| 17:00 | Feature freeze (stage 6). Only demo-flow bugs, video, pitch, dry runs. |
 | 16:00–17:00 | Record the video. Write Devpost. |
 | 17:30 | Final push. Rehearse the 3-minute demo twice. |
 
