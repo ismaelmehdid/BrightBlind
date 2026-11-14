@@ -25,9 +25,9 @@ final class Relay: ObservableObject {
         url = UserDefaults.standard.string(forKey: "relayURL") ?? "ws://192.168.0.10:8765/ws"
     }
 
-    /// The backend address also lives in the repo (ios/backend-url.txt on main), so it can be changed
+    /// The backend address also lives in the repo (a public gist, see ios/README.md), so it can be changed
     /// with a push instead of typing on the phone. A non-empty file wins over the text field.
-    private static let remoteConfig = "https://raw.githubusercontent.com/ismaelmehdid/SecondVision/main/ios/backend-url.txt"
+    private static let remoteConfig = "https://gist.githubusercontent.com/andriidrok1/808022925fe5a7e1556c6051eca3dd19/raw/backend-url.txt"
 
     func connect() {
         wanted = true

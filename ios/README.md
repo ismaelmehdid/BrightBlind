@@ -58,3 +58,12 @@ Down: `capture` (`req_id`, `quality: small|medium|large|full`), `stream` (`on`, 
 second (default 1). A capture in this mode is a still from the live stream, no mode switch.
 Switching modes takes one to three seconds; the glasses heat up after ~30 minutes of
 streaming, so the backend turns it on per scene, not all day.
+
+## Changing the backend address without typing on the phone
+
+The app reads the backend URL from a public gist on launch and on Reconnect (a non-empty value
+wins over the text field):
+
+    echo "wss://host/ws" > /tmp/backend-url.txt && gh gist edit $(cat ios/.backend-gist) -f backend-url.txt /tmp/backend-url.txt
+
+Test the relay without `backend/`: `uv run --with websockets ios/tools/mock_backend.py`.
