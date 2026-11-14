@@ -51,6 +51,7 @@ class Coordinator:
         self.last_summary = ''
         self.last_key = None
         self.recent_lines = []
+        self.fresh_frame = None
         self.warm_until = 0            # keep the glasses stream on until then: a still from a live stream takes ~2 s, a cold photo 3-6 s
         self.last_said = 0
         self.latest_image = None
@@ -181,7 +182,7 @@ class Coordinator:
 
     async def accept(self, text):
         # Tell the wearer at once that the request was heard; the answer follows.
-        if os.getenv('WARM_STREAM', '0') == '1': self.warm_until = time.monotonic() + 120
+        if os.getenv('WARM_STREAM', '0') == '1': self.warm_until = max(self.warm_until, time.monotonic() + 300)
         self.spawn(self.voice.say('Okay.'))
         await self.send('band', {'type': 'led', 'color': '#00bb66'})
         self.plan_version += 1
@@ -251,6 +252,14 @@ class Coordinator:
             self.log('Vision', 'blocked', 'Live capture missing: ' + ', '.join(self.live_missing(require_band=False)))
             return
         epoch = self.epoch if epoch is None else epoch
+        if self.fresh_frame and time.monotonic() - self.fresh_frame[0] < 1.6 and not self.frame_busy:
+            message = self.fresh_frame[1]
+            self.frame_busy = True
+            self.last_frame = time.monotonic()
+            self.latest_image = {'jpeg_b64': message['jpeg_b64'], 'ts': message['ts'], 'scene': self.scene}
+            self.log('Vision', 'frame_from_live_stream', self.scene, age_ms=round((time.monotonic() - self.fresh_frame[0]) * 1000))
+            self.spawn(self.analyze(message['jpeg_b64'], message['ts'], epoch, self.scene, self.target))
+            return
         req_id = str(uuid.uuid4())
         self.pending = {req_id: {'epoch': epoch, 'at': time.monotonic(), 'scene': self.scene, 'target': self.target}}
         if not await self.send('glasses', {'type': 'capture', 'req_id': req_id, 'quality': 'medium'}):
@@ -317,8 +326,10 @@ class Coordinator:
             if self.glasses_state != 'streaming' and time.monotonic() < self.warm_until:
                 await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})      # next still comes from the live stream
                 self.spawn(self.cooldown())
-        elif not self.streaming or self.frame_busy or time.monotonic()-self.last_frame < 2:
-            return
+        else:
+            self.fresh_frame = (time.monotonic(), message)        # newest stream frame, kept even when not analysed
+            if not self.streaming or self.frame_busy or time.monotonic()-self.last_frame < 2:
+                return
         value = message.get('jpeg_b64', '')
         if not isinstance(value, str) or len(value) > 4_000_000: return
         try:

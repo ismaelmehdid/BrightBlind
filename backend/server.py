@@ -139,7 +139,13 @@ def make_app(providers=None):
                 await coordinator.voice.start()
             coordinator.log('Transport', 'connected', role, caps=hello.get('caps', []))
             if role == 'band': await coordinator.send('band', {'type': 'led', 'color': '#2266ff'})
-            else: await coordinator.send('glasses', {'type': 'stop_speaking'})
+            else:
+                await coordinator.send('glasses', {'type': 'stop_speaking'})
+                if os.getenv('WARM_STREAM', '0') == '1':
+                    # Demo mode: camera stream on from the moment the glasses connect, so the first request is fast too.
+                    coordinator.warm_until = time.monotonic() + 600
+                    await coordinator.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})
+                    coordinator.spawn(coordinator.cooldown())
             allowed = {'band': {'audio', 'event', 'activity'}, 'glasses': {'photo', 'frame', 'state', 'button'}}
             async for raw in socket.iter_text():
                 if len(raw) > 5_000_000: raise ValueError('Message too large')
