@@ -1,6 +1,11 @@
 <div align="center">
 
-# BrightBlind
+<h1>
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/brightblind-logo.png">
+    <img src="assets/readme/brightblind-logo.gif" alt="BrightBlind" width="240" height="60">
+  </picture>
+</h1>
 
 **BrightBlind connects the conversations you remember with the world in front of you.**
 
@@ -39,6 +44,8 @@ The same flow works with the item and context supplied at runtime. [`Providers.m
 The broader [video storyboard](docs/demo-video-script.md) covers the journey from home to the store and back.
 
 ## What it does
+
+Say **“BrightBlind”** to get its attention, then ask your question. It replies through the glasses, so you can keep your hands free.
 
 | Ask BrightBlind | Information it uses | What it returns |
 | :--- | :--- | :--- |
