@@ -152,7 +152,7 @@ def make_app(providers=None):
             if role == 'band': await coordinator.send('band', {'type': 'led', 'color': '#2266ff'})
             else:
                 await coordinator.send('glasses', {'type': 'stop_speaking'})
-                if os.getenv('WARM_STREAM', '0') == '1':
+                if os.getenv('WARM_ON_CONNECT', '0') == '1':
                     # Demo mode: camera stream on from the moment the glasses connect, so the first request is fast too.
                     coordinator.warm_until = time.monotonic() + 600
                     await coordinator.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})
