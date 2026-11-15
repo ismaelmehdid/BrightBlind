@@ -14,6 +14,7 @@ from memory import Memory
 
 
 # Sentences that are clearly a request to the device, accepted without the wake word or a double tap.
+WAKE_WORD = re.compile(r"\b(?:hey\s+|ok(?:ay)?\s+)?(?:bright\s*(?:blind|blinds|blond|blonde|line|lines|blend)|brightblind|second\s*vision)\b", re.I)
 DIRECT_REQUEST = re.compile(
     r"\bwhat(?:'s| is| kind of| type of)?\b.*\b(am i holding|in my hand|in front of me|around me|am i looking at)\b"
     r"|\bis (this|it) (what|the one|the right)\b"
@@ -158,8 +159,20 @@ class Coordinator:
             self.log('Coordinator', 'blocked', 'Live workflow missing: ' + ', '.join(missing))
             return
         if source == 'band':
-            addressed = re.match(r'^(?:hey\s+)?second\s*vision[\s,:]+(.+)$', text, re.I)
-            if addressed: text = addressed[1]
+            # Wake word, anywhere in the sentence: "BrightBlind, what am I holding" (also the old "Second Vision").
+            # Deepgram hears it as bright blind / bright line / bright blinds, so those count too.
+            woke = list(WAKE_WORD.finditer(text))
+            addressed = bool(woke)
+            if woke:
+                rest = text[woke[-1].end():].strip(' ,.:;!?-')
+                if len(rest.split()) < 2:
+                    # The name alone: listen to the next sentence.
+                    self.listen_until = time.monotonic() + 10
+                    self.log('Coordinator', 'wake_word', 'Heard the name; listening for one sentence.')
+                    self.spawn(self.voice.say('Yes?'))
+                    return
+                text = rest
+            if addressed: pass
             elif time.monotonic() <= self.listen_until:
                 self.listen_until = 0                    # the double-tap window is for one sentence
             elif os.getenv('REQUIRE_WAKE_WORD', '0') == '1' and time.monotonic() > self.listen_until:
