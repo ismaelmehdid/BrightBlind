@@ -145,6 +145,23 @@ class Providers:
         return {'description': description, 'visible': [landmark] if landmark else [], 'hazards': [], 'uncertain': not found,
                 'found': found, 'position': result.get('position', 'none'), 'action': 'answer' if found else result.get('action', 'turn')}
 
+    async def match(self, image, target, memory):
+        """One call for eyes + memory: what is in the hand, and is it what someone asked for."""
+        result = await self.gemini(
+            'Glasses camera photo. The wearer cannot see and is holding or looking at a product. '
+            'Read the brand, product name and flavour or variant exactly as printed. Then compare it with what '
+            'people asked for in the notes below. The exact variant matters: blueberry is not raspberry. '
+            f'Their question: {json.dumps(target)}.\n\n{memory}\n\n'
+            'answer = what to say aloud, at most two short sentences and 22 words: first what the item is, then '
+            'whether it is what was asked for; if it is the wrong variant say which one was asked for; if the notes '
+            'hold no request say so. No times of day, no mention of what the wearer was doing. '
+            'If no product is clearly visible in the hand, answer "I can\'t see it clearly. Hold it closer to the glasses." and set seen=false.',
+            {'type': 'OBJECT', 'required': ['item', 'answer', 'seen'], 'properties': {
+                'item': {'type': 'STRING'}, 'answer': {'type': 'STRING'}, 'seen': {'type': 'BOOLEAN'}}}, image)
+        item = str(result.get('item', ''))[:160]
+        return {'description': str(result.get('answer') or 'I could not tell what that is.')[:300], 'visible': [item] if item else [],
+                'hazards': [], 'uncertain': not result.get('seen', True)}
+
     async def vision(self, scene, image, target):
         if scene == 'shelf': return await self.guide(image, target)
         if scene == 'exit': return await self.find_exit(image)

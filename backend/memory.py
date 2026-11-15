@@ -136,6 +136,14 @@ class Memory:
 
     # --- answering -----------------------------------------------------------------------
 
+    def context(self, lines=30):
+        """Memories and recent lines as text, for a prompt that needs them next to an image."""
+        memories = self._rows('SELECT * FROM memories ORDER BY ts')
+        recent = list(reversed(self._rows('SELECT * FROM lines ORDER BY ts DESC LIMIT ?', (lines,))))
+        mem = '\n'.join(f"- [{m['kind']}] {m['text']}" for m in memories) or '(none)'
+        said = '\n'.join(f"- {r['text']}" for r in recent if r['source'] == 'band') or '(none)'
+        return f'MEMORIES:\n{mem}\n\nRECENT LINES HEARD:\n{said}'
+
     async def answer(self, question):
         memories = self._rows('SELECT * FROM memories ORDER BY ts')
         lines = list(reversed(self._rows('SELECT * FROM lines ORDER BY ts DESC LIMIT ?', (ANSWER_LINES,))))

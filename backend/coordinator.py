@@ -52,6 +52,7 @@ class Coordinator:
         self.last_key = None
         self.recent_lines = []
         self.fresh_frame = None
+        self.want_frame = None
         self.quiet_replies = False     # True while the current request came from the band: no "I didn't catch that" chatter
         self.warm_until = 0            # keep the glasses stream on until then: a still from a live stream takes ~2 s, a cold photo 3-6 s
         self.last_said = 0
@@ -269,6 +270,11 @@ class Coordinator:
             self.log('Vision', 'frame_from_live_stream', self.scene, age_ms=round((time.monotonic() - self.fresh_frame[0]) * 1000))
             self.spawn(self.analyze(message['jpeg_b64'], message['ts'], epoch, self.scene, self.target))
             return
+        if self.glasses_state == 'streaming' and not self.frame_busy:
+            # Stream is running but the newest frame is old: take the next one (they come every second).
+            self.want_frame = (epoch, time.monotonic())
+            self.log('Vision', 'waiting_for_stream_frame', self.scene)
+            return
         req_id = str(uuid.uuid4())
         self.pending = {req_id: {'epoch': epoch, 'at': time.monotonic(), 'scene': self.scene, 'target': self.target}}
         if not await self.send('glasses', {'type': 'capture', 'req_id': req_id, 'quality': 'medium'}):
@@ -337,6 +343,14 @@ class Coordinator:
                 self.spawn(self.cooldown())
         else:
             self.fresh_frame = (time.monotonic(), message)        # newest stream frame, kept even when not analysed
+            if self.want_frame and self.want_frame[0] == self.epoch and time.monotonic() - self.want_frame[1] < 6 and not self.frame_busy:
+                self.want_frame = None
+                self.frame_busy = True
+                self.last_frame = time.monotonic()
+                self.latest_image = {'jpeg_b64': message['jpeg_b64'], 'ts': message['ts'], 'scene': self.scene}
+                self.log('Vision', 'frame_from_live_stream', self.scene, age_ms=0)
+                self.spawn(self.analyze(message['jpeg_b64'], message['ts'], self.epoch, self.scene, self.target))
+                return
             if not self.streaming or self.frame_busy or time.monotonic()-self.last_frame < 2:
                 return
         value = message.get('jpeg_b64', '')
@@ -355,7 +369,10 @@ class Coordinator:
     async def analyze(self, image, captured_at, epoch, scene, target):
         started = time.monotonic()
         try:
-            result = await self.providers.vision(scene, image, target)
+            if scene == 'match':
+                result = await self.providers.match(image, target, self.memory.context())     # eyes + memory, one call
+            else:
+                result = await self.providers.vision(scene, image, target)
             if epoch != self.epoch: return
             age_ms = round(time.time()*1000 - captured_at)
             if scene == 'exit' and age_ms > 8000: return      # wearer is turning: an old frame is just dropped
@@ -379,17 +396,8 @@ class Coordinator:
                 matched = any(re.search(r'(?<!\w)' + re.escape(self.bus['line']) + r'(?!\w)', item, re.I) for item in result['visible']) if self.bus['line'] else False
                 summary += ' The visible number matches the planned line; confirm the direction and boarding with the driver.' if matched else ' I have not confirmed a match to your planned bus.'
             if scene == 'match':
-                # Eyes + memory in one answer: what is in the hand, and is it what someone asked for.
-                items = ', '.join(result['visible']) or result['description']
-                self.log('Researcher · Recall', 'started', f'{target} | seen: {items}')
-                answer = await self.memory.answer(
-                    f'The wearer is holding or looking at: {items}. Their question: {target}. First say what the item is. '
-                    'Then say whether it matches what someone asked for or wanted, naming who and when if the memory says. '
-                    'Compare the exact flavour or variant: blueberry is not raspberry. If it is the wrong variant say which one was asked for. '
-                    'Mention a price only if it is in the item list. If the memory holds no such request, say so.')
-                if epoch == self.epoch:
-                    self.log('Researcher · Recall', 'evidence', answer)
-                    await self.say(answer)
+                self.log('Researcher · Recall', 'evidence', summary, item=', '.join(result['visible']))
+                await self.say(summary)
                 return
             if scene == 'exit':
                 if result.get('found'):
