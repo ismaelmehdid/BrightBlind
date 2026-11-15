@@ -14,7 +14,7 @@ from memory import Memory
 
 
 # Sentences that are clearly a request to the device, accepted without the wake word or a double tap.
-WAKE_WORD = re.compile(r"\b(?:hey\s+|ok(?:ay)?\s+)?(?:bright\s*(?:blind|blinds|blond|blonde|line|lines|blend)|brightblind|second\s*vision)\b", re.I)
+WAKE_WORD = re.compile(r"\b(?:hey\s+|ok(?:ay)?\s+)?(?:bright\s*(?:blind|blinds|blond|blonde|line|lines|blend|light|lights)|brightblind)\b", re.I)
 DIRECT_REQUEST = re.compile(
     r"\bwhat(?:'s| is| kind of| type of)?\b.*\b(am i holding|in my hand|in front of me|around me|am i looking at)\b"
     r"|\bis (this|it) (what|the one|the right)\b"
@@ -54,6 +54,7 @@ class Coordinator:
         self.recent_lines = []
         self.fresh_frame = None
         self.want_frame = None
+        self.trace = None
         self.quiet_replies = False     # True while the current request came from the band: no "I didn't catch that" chatter
         self.warm_until = 0            # keep the glasses stream on until then: a still from a live stream takes ~2 s, a cold photo 3-6 s
         self.last_said = 0
@@ -78,8 +79,25 @@ class Coordinator:
         with open(self.session_file, 'a') as f:
             f.write(json.dumps({'ts': round(time.time() * 1000), 'agent': 'Session', 'event': 'started', 'detail': why}) + '\n')
 
+    def timing(self):
+        """Close the current request's trace: one line with how long each step took."""
+        t, self.trace = self.trace, None
+        ms = lambda a, b: round((t[b] - t[a]) * 1000) if a in t and b in t else None
+        steps = {'1_heard_to_plan': ms('heard', 'planned'), '2_plan_to_frame': ms('planned', 'frame'),
+                 '3_frame_to_answer_gemini': ms('frame', 'answer'), '4_answer_to_speech_sent_tts': ms('answer', 'spoken'),
+                 'ack_okay_after': ms('heard', 'ack'), 'total_heard_to_speech_sent': ms('heard', 'spoken')}
+        known = {k: v for k, v in steps.items() if v is not None and k[0].isdigit()}
+        slowest = max(known, key=known.get) if known else None
+        self.log('Timing', 'request', t.get('text', ''), scene=t.get('scene'), frame_age_ms=t.get('frame_age_ms'), slowest=slowest, **steps)
+
     def log(self, agent, event, detail, **extra):
         row = {'ts': round(time.time() * 1000), 'agent': agent, 'event': event, 'detail': detail, **extra}
+        if event == 'audio_sent' and getattr(self, 'trace', None):
+            if 'answer' in self.trace:
+                self.trace['spoken'] = time.monotonic()
+                self.timing()
+            elif 'ack' not in self.trace:
+                self.trace['ack'] = time.monotonic()
         if agent == 'Transport' and event == 'connected' and len(self.clients) <= 1 \
                 and self.session_file and self.session_file.stat().st_size > 400:
             self.new_session(f'{detail} relay connected')
@@ -172,19 +190,14 @@ class Coordinator:
                     self.spawn(self.voice.say('Yes?'))
                     return
                 text = rest
-            if addressed: pass
+            if addressed:
+                pass
             elif time.monotonic() <= self.listen_until:
-                self.listen_until = 0                    # the double-tap window is for one sentence
-            elif os.getenv('REQUIRE_WAKE_WORD', '0') == '1' and time.monotonic() > self.listen_until:
-                # Not addressed by name and no double tap. Fast path: the last sentence is plainly a request.
-                sentences = [part.strip() for part in re.split(r'(?<=[.?!])\s+', text) if part.strip()]
-                request = next((part for part in reversed(sentences[-2:]) if DIRECT_REQUEST.search(part)), None)
-                if request:
-                    text = request
-                else:
-                    # Otherwise the gate agent decides (one Gemini call, off the audio path).
-                    self.spawn(self.gate(text, speaker))
-                    return
+                self.listen_until = 0                    # a double tap (or the name alone) admits one sentence
+            elif os.getenv('REQUIRE_WAKE_WORD', '0') == '1':
+                # Strict: without the name the sentence is only remembered. No "Okay", no camera, no reply.
+                self.log('Coordinator', 'ignored', 'No wake word: remembered, not acted on.')
+                return
         await self.accept(text, quiet=source == 'band')
 
     async def gate(self, text, speaker):
@@ -199,6 +212,7 @@ class Coordinator:
 
     async def accept(self, text, quiet=False):
         self.quiet_replies = quiet
+        self.trace = {'text': text[:80], 'heard': time.monotonic()}      # one timing line per request (see log())
         # Tell the wearer at once that the request was heard; the answer follows.
         if os.getenv('WARM_STREAM', '0') == '1': self.warm_until = max(self.warm_until, time.monotonic() + 300)
         self.spawn(self.voice.say('Okay.'))
@@ -212,6 +226,7 @@ class Coordinator:
             plan = await self.providers.plan(text)
             if version != self.plan_version: return
             scene = plan.get('scene')
+            if self.trace: self.trace.update(planned=time.monotonic(), scene=scene)
             self.log('Planner · '+plan.get('source', 'Gemini'), 'decision', scene, reason=plan.get('reply', ''), ms=round((time.monotonic()-started)*1000))
             if scene == 'stop': await self.stop(); return
             if scene == 'reply':
@@ -229,6 +244,7 @@ class Coordinator:
                     answer = await self.providers.recall(text)   # fallback: a separate Recall server
                 if version == self.plan_version:
                     self.log('Researcher · Recall', 'evidence', answer)
+                    if self.trace: self.trace['answer'] = time.monotonic()
                     await self.say(answer)
                 return
             if scene == 'bus_timing':
@@ -381,6 +397,8 @@ class Coordinator:
 
     async def analyze(self, image, captured_at, epoch, scene, target):
         started = time.monotonic()
+        if self.trace and 'frame' not in self.trace:
+            self.trace.update(frame=started, frame_age_ms=round(time.time() * 1000 - captured_at))
         try:
             if scene == 'match':
                 result = await self.providers.match(image, target, self.memory.context())     # eyes + memory, one call
@@ -408,6 +426,7 @@ class Coordinator:
                 # A number match is evidence, never permission to board or cross.
                 matched = any(re.search(r'(?<!\w)' + re.escape(self.bus['line']) + r'(?!\w)', item, re.I) for item in result['visible']) if self.bus['line'] else False
                 summary += ' The visible number matches the planned line; confirm the direction and boarding with the driver.' if matched else ' I have not confirmed a match to your planned bus.'
+            if self.trace and 'answer' not in self.trace: self.trace['answer'] = time.monotonic()
             if scene == 'match':
                 self.log('Researcher · Recall', 'evidence', summary, item=', '.join(result['visible']))
                 await self.say(summary)
