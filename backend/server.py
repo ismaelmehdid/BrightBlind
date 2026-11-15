@@ -167,9 +167,12 @@ def make_app(providers=None):
                     event = message.get('kind') if kind == 'event' else message.get('press')
                     coordinator.log('Vexo band' if role == 'band' else 'Meta glasses', 'gesture', event)
                     if event in ('double-tap', 'double', 'short'):
-                        coordinator.listen_until = time.monotonic() + 20
+                        # A double tap only opens the ear for the next sentence. It no longer takes a photo by
+                        # itself: the band also reports double taps from ordinary arm movement, and each one
+                        # made the glasses describe the desk.
+                        coordinator.listen_until = time.monotonic() + 10
                         await coordinator.voice.interrupt()
-                        await coordinator.capture()
+                        if event == 'short': await coordinator.capture()      # the glasses' own button still means "look" 
                     elif event == 'hold': await coordinator.stop()
                     elif event == 'free-fall':
                         await coordinator.stop()

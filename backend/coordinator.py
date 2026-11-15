@@ -52,6 +52,7 @@ class Coordinator:
         self.last_key = None
         self.recent_lines = []
         self.fresh_frame = None
+        self.quiet_replies = False     # True while the current request came from the band: no "I didn't catch that" chatter
         self.warm_until = 0            # keep the glasses stream on until then: a still from a live stream takes ~2 s, a cold photo 3-6 s
         self.last_said = 0
         self.latest_image = None
@@ -158,6 +159,8 @@ class Coordinator:
         if source == 'band':
             addressed = re.match(r'^(?:hey\s+)?second\s*vision[\s,:]+(.+)$', text, re.I)
             if addressed: text = addressed[1]
+            elif time.monotonic() <= self.listen_until:
+                self.listen_until = 0                    # the double-tap window is for one sentence
             elif os.getenv('REQUIRE_WAKE_WORD', '0') == '1' and time.monotonic() > self.listen_until:
                 # Not addressed by name and no double tap. Fast path: the last sentence is plainly a request.
                 sentences = [part.strip() for part in re.split(r'(?<=[.?!])\s+', text) if part.strip()]
@@ -168,7 +171,7 @@ class Coordinator:
                     # Otherwise the gate agent decides (one Gemini call, off the audio path).
                     self.spawn(self.gate(text, speaker))
                     return
-        await self.accept(text)
+        await self.accept(text, quiet=source == 'band')
 
     async def gate(self, text, speaker):
         try:
@@ -176,11 +179,12 @@ class Coordinator:
             addressed, request = await self.providers.addressed(text, speaker, self.recent_lines[:-1], self.streaming)
             self.log('Gate · Gemini', 'decision', 'request' if addressed else 'ignored', heard=text[:160], speaker=speaker,
                      ms=round((time.monotonic() - started) * 1000))
-            if addressed: await self.accept(request)
+            if addressed: await self.accept(request, quiet=True)
         except Exception as error:
             self.log('Gate · Gemini', 'failed', type(error).__name__)
 
-    async def accept(self, text):
+    async def accept(self, text, quiet=False):
+        self.quiet_replies = quiet
         # Tell the wearer at once that the request was heard; the answer follows.
         if os.getenv('WARM_STREAM', '0') == '1': self.warm_until = max(self.warm_until, time.monotonic() + 300)
         self.spawn(self.voice.say('Okay.'))
@@ -196,7 +200,12 @@ class Coordinator:
             scene = plan.get('scene')
             self.log('Planner · '+plan.get('source', 'Gemini'), 'decision', scene, reason=plan.get('reply', ''), ms=round((time.monotonic()-started)*1000))
             if scene == 'stop': await self.stop(); return
-            if scene == 'reply': await self.say(plan.get('reply') or 'Please ask me to read a view or plan a route.'); return
+            if scene == 'reply':
+                if self.quiet_replies:
+                    self.log('Coordinator', 'no_reply', 'Planner found no request in this sentence; staying silent.')
+                else:
+                    await self.say(plan.get('reply') or 'Please ask me to read a view or plan a route.')
+                return
             if scene == 'memory':
                 self.log('Researcher · Recall', 'started', text)
                 try:
@@ -376,6 +385,7 @@ class Coordinator:
                 answer = await self.memory.answer(
                     f'The wearer is holding or looking at: {items}. Their question: {target}. First say what the item is. '
                     'Then say whether it matches what someone asked for or wanted, naming who and when if the memory says. '
+                    'Compare the exact flavour or variant: blueberry is not raspberry. If it is the wrong variant say which one was asked for. '
                     'Mention a price only if it is in the item list. If the memory holds no such request, say so.')
                 if epoch == self.epoch:
                     self.log('Researcher · Recall', 'evidence', answer)

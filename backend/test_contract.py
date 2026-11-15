@@ -86,7 +86,9 @@ class ContractTests(unittest.TestCase):
                 band.send_json(message('hello', client='band', caps=['audio', 'events', 'activity']))
                 self.assertEqual(band.receive_json()['type'], 'led')
                 band.send_json(message('activity', state='walk', steps=4, cadence=80))
+                # A double tap opens the ear for one sentence; the glasses' own button ("short") takes the photo.
                 band.send_json(message('event', kind='double-tap'))
+                glasses.send_json(message('button', press='short'))
                 first = glasses.receive_json()
                 if first['type'] == 'stop_speaking': first = glasses.receive_json()
                 self.assertEqual(first['type'], 'capture')

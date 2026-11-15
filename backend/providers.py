@@ -48,7 +48,9 @@ class Providers:
             'A blind person wears camera glasses and a wristband microphone that hears everything around them. '
             'Decide if the NEW SENTENCE is a request or question addressed to their assistant (asking what something is, '
             'where something is, to read, find, check, remember or stop), or ordinary talk between people. '
-            'Requests are usually in the first person about what the speaker sees, holds or wants to find. '
+            'A request asks the assistant to look, identify, read, find, check, remember or stop: "what am I holding", '
+            '"is this the right one", "where is the exit". Wishes and statements are NOT requests, even in the first person: '
+            '"I want raspberry fig bars", "I would like some chips", "we need milk" are things to remember, not to act on. '
             f'Loudness suggests the speaker is: {speaker} ("wearer" = close to the band, "nearby" = someone else; a guess). '
             f'Camera currently {"on" if camera_on else "off"}. Recent lines: {json.dumps(recent[-4:])}. '
             f'NEW SENTENCE: {json.dumps(text)}. When unsure answer false.',
@@ -148,7 +150,7 @@ class Providers:
         if scene == 'exit': return await self.find_exit(image)
         result = await self.gemini(
             f'Describe this {dict(match="hand-held product").get(scene, scene)} image for a blind wearer. Target: {json.dumps(target)}. '+
-            'Answer in one short sentence, at most 15 words, prioritizing the requested item. List only visible labels or items. If the target is not visible, say so. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For food or a shelf item, describe image-relative position (left/right/center, upper/lower) but never guide the hand. Identify visible stairs, curbs or potential obstructions such as chairs, tables, bags, boxes, cables or other objects. Include at most two in obstacles, with camera-image position; do not infer they actually block a path or how far away they are. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return description, visible text/items, hazards, obstacles, and uncertainty.',
+            'Answer in one short sentence, at most 15 words, prioritizing the requested item. For a product in the hand, read the brand, product name and flavour or variant exactly as printed on the package (for example "raspberry" versus "blueberry") and put them in the visible list. List only visible labels or items. If the target is not visible, say so. For a fridge, absence from one view does not prove stock is missing. For a bus, read number/headsign but never authorize boarding. For food or a shelf item, describe image-relative position (left/right/center, upper/lower) but never guide the hand. Identify visible stairs, curbs or potential obstructions such as chairs, tables, bags, boxes, cables or other objects. Include at most two in obstacles, with camera-image position; do not infer they actually block a path or how far away they are. No safe-path claims, step counts, precise distances, movement commands, or medication selection. Return description, visible text/items, hazards, obstacles, and uncertainty.',
             {'type': 'OBJECT', 'required': ['description', 'visible', 'hazards', 'uncertain'], 'properties': {
                 'description': {'type': 'STRING'}, 'visible': {'type': 'ARRAY', 'items': {'type': 'STRING'}},
                 'hazards': {'type': 'ARRAY', 'items': {'type': 'STRING', 'enum': ['stairs', 'curb', 'obstruction', 'vehicle']}},
