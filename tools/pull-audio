@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Download every clip the agent spoke (and the session logs) from the backend, for the demo video.
+#   tools/pull-audio [folder]        default: ./demo-audio
+# Needs ~/.config/appstore/secondvision/brightblind.env (DASHBOARD_TOKEN, BACKEND_URL).
+set -euo pipefail
+. "$HOME/.config/appstore/secondvision/brightblind.env"
+OUT="${1:-demo-audio}"; mkdir -p "$OUT"
+H="Authorization: Bearer $DASHBOARD_TOKEN"
+curl -s -H "$H" "$BACKEND_URL/api/audio" | python3 -c 'import sys,json;[print(x["name"]) for x in json.load(sys.stdin)]' | while read -r name; do
+  [ -f "$OUT/$name" ] || curl -s -H "$H" "$BACKEND_URL/api/audio/$name" -o "$OUT/$name"
+done
+ls "$OUT" | wc -l | xargs echo "clips in $OUT:"

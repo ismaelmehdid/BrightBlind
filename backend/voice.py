@@ -97,6 +97,15 @@ class GlassesOutput(FrameProcessor):
                 else:   # no ffmpeg command on this machine: same MP3 through PyAV
                     audio = await asyncio.wait_for(asyncio.to_thread(mp3_with_pyav, pcm, self.sample_rate), 5)
                 if not audio: raise RuntimeError('MP3 encoding failed')
+                try:
+                    # Keep every spoken clip (for the demo video): /data/audio/<time>_<first words>.mp3
+                    folder = self.owner.coordinator.log_dir.parent / 'audio'
+                    folder.mkdir(parents=True, exist_ok=True)
+                    words = '-'.join(''.join(ch for ch in self.owner.last_text.lower() if ch.isalnum() or ch == ' ').split()[:8]) or 'clip'
+                    name = time.strftime('%H-%M-%S') + f'_{int(time.time() * 1000) % 1000:03d}_{words}.mp3'
+                    (folder / name).write_bytes(audio)
+                    self.owner.coordinator.log('Voice', 'clip_saved', name, text=self.owner.last_text[:200], bytes=len(audio))
+                except OSError: pass
                 self.owner.muted_until = time.monotonic() + len(pcm)/(self.sample_rate*2) + .4
                 delivered = await self.owner.coordinator.send('glasses', {'type': 'say', 'audio_b64': base64.b64encode(audio).decode(), 'interrupt': True})
                 self.owner.coordinator.log(self.owner.tts_name + ' via Pipecat', 'audio_sent' if delivered else 'audio_undelivered', 'MP3 sent to glasses relay' if delivered else 'MP3 generated but relay delivery failed',
@@ -115,6 +124,7 @@ class Voice:
         # Loudness of recent band audio, to guess who spoke a turn: the wearer's mouth is ~40 cm from the
         # wrist, other people are further away, so their turns arrive quieter. An estimate, not diarization
         # (Deepgram Flux has no speaker labels).
+        self.last_text = ''
         self.levels = collections.deque(maxlen=1500)      # (monotonic time, rms) per 20 ms packet, ~30 s
         # Noise gate: packets quieter than BAND_NOISE_GATE (rms, 0 = off) are sent to Deepgram as silence, so
         # far-away talk is not transcribed. Live run 11-14: wearer turns 3600-12900, table neighbours 1900-4200.
@@ -198,6 +208,7 @@ class Voice:
         await self.worker.queue_frame(TypedQuestion(text=text))
 
     async def say(self, text):
+        self.last_text = str(text)
         await self.start()
         await self.worker.queue_frame(TTSSpeakFrame(text=text))
 

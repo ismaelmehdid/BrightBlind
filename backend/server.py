@@ -91,6 +91,17 @@ def make_app(providers=None):
         await app.state.coordinator.voice.question(body.text)
         return {'accepted': True, 'path': 'pipecat → planner → glasses'}
 
+    @app.get('/api/audio')
+    async def audio_list():
+        folder = app.state.coordinator.log_dir.parent / 'audio'
+        return [{'name': f.name, 'bytes': f.stat().st_size} for f in sorted(folder.glob('*.mp3'))] if folder.is_dir() else []
+
+    @app.get('/api/audio/{name}')
+    async def audio_file(name: str):
+        path = app.state.coordinator.log_dir.parent / 'audio' / name
+        if '/' in name or '..' in name or not path.is_file(): return JSONResponse({'detail': 'No such clip'}, status_code=404)
+        return FileResponse(path, media_type='audio/mpeg')
+
     @app.post('/api/memory/reset')
     async def memory_reset():
         app.state.coordinator.recent_lines = []
