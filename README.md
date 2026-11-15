@@ -1,138 +1,236 @@
+<div align="center">
+
 # BrightBlind
 
-Eyes for people who cannot see, built from two wearables that each do half the job.
+**A wearable assistant that remembers what you heard, reads what you see, and answers through your glasses.**
 
-VexoHacks, Y Combinator SF, November 14, 2026. Team: Andrii (Meta glasses + iPhone), Ismaël (Vexo band + laptop), Tarang (backend + agents).
+[The demo](#one-minute-demo) · [What it does](#what-it-does) · [Architecture](#architecture) · [Engineering](#engineering-decisions) · [Quick start](#quick-start) · [Evidence](#what-we-verified)
 
-## What it is
+<sub>Built at VexoHacks in San Francisco, November 14, 2026. Vexo · Meta glasses · Pipecat · Deepgram · Google Gemini · Google Maps.</sub>
 
-A blind user wears a Vexo band on the wrist and Ray-Ban Meta glasses on the face.
+</div>
 
-- The **band** is the ears and the button. It listens all the time, so the user just talks: "what am I missing in the fridge", "find the dark chocolate", "is this my bus". A double tap on the band means "look now". The band also knows when the user is walking, standing still, or has fallen.
-- The **glasses** are the eyes and the voice. They have a camera and speakers but no always-on microphone the user can rely on. When the agent needs to see, it tells the glasses to take a photo or to stream video. The answer is spoken into the glasses' speakers.
-- The **agent** in the middle decides when to look, what to look for, and what to say. It is not a chat window. The user never touches a phone.
+## Why we built it
 
-Neither device works alone: the band cannot see and has no speaker, the glasses cannot listen all day and have no gesture input the user can find by touch. Together they make a person who cannot see able to ask the world a question and get a spoken answer.
+A trip to the grocery store starts before you reach the shelf. There is a route to plan, a bus stop to find, a bus number to confirm, and a product to pick from several similar packages.
 
-## Demo scenes (what the judges will see)
+For someone who is blind or has low vision, information along that journey can be difficult to access visually. We wanted to make asking about it feel as natural as asking someone beside you.
 
-1. **Fridge.** User opens the fridge, says "what am I missing". Agent takes a photo through the glasses, lists what is there, compares with the user's usual stock, says what is missing.
-2. **Bus stop.** User says "I am going to the store". Agent gets the route and the bus arrival time from Google Maps. One minute before arrival it starts streaming from the glasses, reads bus numbers as they pull in, and says "this is the 38, yours, get on" or "not yours, wait".
-3. **Shelf.** In the store the user says "find the dark chocolate". Agent streams, finds it on the shelf, and guides the hand: "higher", "a bit left", "that one".
+BrightBlind connects the things a wearer hears, sees through the glasses, and needs to remember. Our one minute demo focuses on a bag of **Doritos**: a familiar object that brings the whole interaction into focus.
 
-Every scene has the same shape: the band hears, the agent decides to look, the glasses see, the glasses speak.
+## One minute demo
+
+The story is simple: remember the request, look at the product, and check whether it is the right one.
+
+| Moment | What happens |
+| :--- | :--- |
+| **Hear the request** | Vexo captures the spoken context, including what someone asked for. |
+| **Ask about the item** | The wearer asks, “BrightBlind, is this the one they wanted?” |
+| **Look when needed** | The coordinator takes a photo or selects a fresh frame from the glasses. |
+| **Compare the details** | Gemini reads the product and variant, then compares the image with remembered context in one call. |
+| **Hear the answer** | Deepgram generates a short response, delivered through the glasses. If the label or memory is unclear, the answer says so. |
+
+The item comparison lives in [`Providers.match`](backend/providers.py); remembered context comes from [`Memory`](backend/memory.py). Doritos is the demo subject, not a preset product answer.
+
+The broader [video storyboard](docs/demo-video-script.md) covers the journey from home to the store and back.
+
+## What it does
+
+| Ask BrightBlind | Information it uses | What it returns |
+| :--- | :--- | :--- |
+| “What am I holding?” | A camera image | Visible product names, labels, and variants. |
+| “Is this what they asked for?” | The image and saved conversation context | A comparison with the remembered request, including uncertainty. |
+| “Where is the food?” | Selected frames from the glasses | A description of the target's position in the camera view. |
+| “Where is the exit?” | Door and exit-sign observations | The visible target's position, or a request for a clearer view. |
+| “Which bus should I take?” | A starting address, destination, and Google Maps | A transit route, departure stop, line, and departure estimate. |
+| “When is the next bus?” | A refreshed Maps request for the saved route | Minutes until the returned departure estimate. |
+| “What is in my way?” | Visible objects in the camera view | Potential obstacle descriptions, including chairs, bags, boxes, stairs, and curbs. |
+| “What did they ask me to bring?” | Captured speech and memory | An answer grounded in the recorded context. |
+
+**Visual information is assistance, not a guarantee of safe movement.** A visible bus number does not authorize boarding. A photo of stairs does not establish where to put a foot. BrightBlind is intended to complement a cane, guide dog, or other established mobility support.
+
+### Why Vexo matters
+
+Vexo is the listening and memory side of the system. The glasses provide the camera and spoken output. This separation lets the assistant keep useful context without requiring a continuous glasses camera stream.
+
+The camera can run only when a task needs it. For a faster demonstration, `WARM_STREAM=1` deliberately keeps the stream ready between requests. That trades camera activity for lower capture delay. **Battery savings have not yet been measured on the hardware.**
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    Band["Vexo band<br/>speech · taps · activity"] --> Hub["Phone or laptop hub"]
+    Glasses["Meta glasses<br/>camera · speakers"] <--> Phone["Native iPhone app"]
+    Hub --> Socket["Backend /ws"]
+    Phone <--> Socket
+
+    subgraph Backend["Python backend"]
+        Socket --> Voice["Pipecat<br/>Deepgram Flux STT"]
+        Voice --> Planner["Request planner"]
+        Planner --> Vision["Gemini<br/>vision · item comparison"]
+        Planner --> Transit["Google Maps<br/>routes · departure estimates"]
+        Planner <--> Memory["Recall memory<br/>SQLite · Gemini"]
+        Vision --> Reply["Short spoken answer"]
+        Transit --> Reply
+        Memory --> Reply
+        Reply --> Speech["Pipecat<br/>Deepgram Aura TTS"]
+        Speech --> Socket
+    end
+
+    Backend --> Dashboard["Dashboard<br/>frames · decisions · timing"]
 ```
-Vexo band ──BLE──> laptop (Python, vexo-open-kit) ──> Opus audio, taps, motion ──┐
-                                                                                 ├──WebSocket──> backend
-Ray-Ban Meta ──BLE/Wi-Fi──> iPhone relay app (Swift, Meta DAT SDK) ──> photos, frames ─┘        │
-                              ▲                                                                   │
-                              └──── capture / stream on|off / say (text or audio) ────────────────┘
 
-backend: Pipecat voice loop (Deepgram STT ─ LLM ─ ElevenLabs TTS) + agents (planner, vision on Gemini,
-         transit on Google Maps, researcher) + dashboard for judges
+**Pipecat and Deepgram are on the actual voice path.** Deepgram Flux transcribes band audio; Pipecat carries the request through the backend; Deepgram Aura generates the spoken response. Gemini handles visual reasoning and memory tasks. Google Maps supplies transit data.
+
+The native app carries images and audio between the glasses and backend. The Vexo band can connect through the native phone integration or through the laptop's Recall process. One process should own the band's connection at a time.
+
+### The agents
+
+| Component | Responsibility | Source |
+| :--- | :--- | :--- |
+| Planner | Select vision, item comparison, transit, exit finding, or memory. Obvious commands can route directly. | [`providers.py`](backend/providers.py), [`coordinator.py`](backend/coordinator.py) |
+| Vision and Guide | Inspect selected images, locate a target in the view, and ask for another view when needed. | [`providers.py`](backend/providers.py) |
+| Transit | Fetch a route and departure estimate, refresh timing, and schedule a bus-view check. | [`providers.py`](backend/providers.py), [`transit_speech.py`](backend/transit_speech.py) |
+| Recall memory | Keep speech and visual notes with activity context, distill memories, and answer remembered questions. | [`memory.py`](backend/memory.py) |
+| Voice | Recognize speech, generate audio, handle interruptions, and encode replies for the glasses. | [`voice.py`](backend/voice.py) |
+
+The dashboard shows selected frames and the work behind the answer. Session logs record agent events and timing; they are stored in the configured data directory, not in the repository.
+
+## Engineering decisions
+
+### Keep the conversation moving while the camera works
+
+Camera capture, model inference, and transit requests take different amounts of time. The coordinator runs slower work separately from the voice connection, allowing a short acknowledgement while the result is being prepared.
+
+Requests carry identifiers and generation checks. A late photo or model result should not become the answer to a newer question. Streaming analysis is bounded so frames do not accumulate into a stale queue.
+
+### Ask the model once when one call is enough
+
+For the Doritos interaction, the image and remembered request go into the same Gemini call. The model can identify the item and compare the variant without separate “what is this?” and “is it right?” round trips.
+
+Gemini calls default to `GEMINI_THINKING_LEVEL=LOW`. Explicit bus, food, and label requests can route without a planner-model call. The scene facts still come from the image or provider response.
+
+### Optimize the audio the app actually plays
+
+The current glasses contract accepts complete audio clips. Flux can produce its first audio quickly, but waiting for its entire clip introduced a noticeable delay in this setup.
+
+We compared real Deepgram services through Pipecat. For the same diagnostic sentence, median complete-clip generation was **6.6 seconds with Flux WebSocket** and **2.1 seconds with Aura HTTP**, across three calls per service. That is why Aura HTTP is the current default. It is a speech-generation measurement, not a claim about complete response time.
+
+### Avoid a new shutter request when a fresh frame exists
+
+The coordinator can use a recent frame from an active stream instead of asking the glasses to capture another still. If the stream is running but the cached frame is old, it waits for a new frame.
+
+The tradeoff is power use. A warm stream is useful for quick follow-up questions, while camera activation on demand is the more conservative operating mode. An explicit stop turns the warm stream off.
+
+## What we verified
+
+These are recorded engineering checks from November 14. They distinguish live provider calls, a connected-glasses test, and isolated test fixtures.
+
+| Check | Recorded result | Evidence |
+| :--- | :--- | :--- |
+| Deepgram through Pipecat | Real Flux STT transcribed a diagnostic phrase. Real speech output produced an MP3 that was transcribed back successfully. Wearable inputs were simulated in that engineering check. | [`verification.json`](backend/verification.json) |
+| Connected glasses and cloud AI | An approved typed request returned a photo from the connected glasses, produced a Gemini observation, and sent Deepgram audio back to the glasses app. | [`railway-camera-verification.json`](backend/railway-camera-verification.json) |
+| Google Maps | The live Routes API returned a San Francisco transit route; the backend extracted line 5 and its departure stop. | [`maps-verification.json`](backend/maps-verification.json) |
+| Gemini LOW | A real structured classification call accepted LOW thinking and completed in about 1.7 seconds. | [`low-thinking-verification.json`](backend/low-thinking-verification.json) |
+| Speech output comparison | Three calls per service: 6.6 s versus 2.1 s median complete-clip generation. | [`speech-latency-benchmark.json`](backend/speech-latency-benchmark.json) |
+
+The recorded connected-glasses check returned its observation at **5.8 seconds** and sent the answer audio at **10.8 seconds**. It preceded the newer speech and stream-reuse changes. Those numbers are historical measurements, not the claimed latency of the latest build. Audio delivery to the app is also not a measurement of when the wearer heard it.
+
+## Quick start
+
+### Start the backend
+
+Requires Python 3.12. The current speech encoder uses `ffmpeg` when available and has a PyAV fallback.
+
+```sh
+git clone https://github.com/ismaelmehdid/BrightBlind.git
+cd BrightBlind/backend
+uv venv .venv --python 3.12
+uv pip install --python .venv/bin/python -r requirements.txt
+cp .env.example .env
 ```
 
-**Memory layer (Recall, Ismaël).** Next to the live loop, the band's day is kept as memory:
+Set the provider keys and relay tokens in `.env`, then run:
 
-```
-band mic ──> laptop: Pipecat (Deepgram Flux STT) ──> SQLite: every sentence + what the body was doing
-                                                       (still / walk / run, steps, taps)
-                                                         │
-                         Gemini 4 (gemini-4-hydrogen) ───┴──> memories (task, plan, person, fact, ...)
-                                                               and answers ("what did Sam want from me?")
+```sh
+.venv/bin/python server.py
 ```
 
-One tap on the band keeps the last 30 seconds; a double-tap followed by a spoken question gets a spoken answer
-(Deepgram TTS on the laptop). A local page (`http://localhost:8100`) shows what was heard, the memories, and the
-band timeline. The same server runs on Railway (`recall/cloud.py`) for the phone. The backend's planner can use it
-as the user's long-term memory (for example the "usual stock" in the fridge scene) over plain HTTP on the same
-server (Railway: add `?token=` or `Authorization: Bearer`):
+Open [the local dashboard](http://127.0.0.1:8765). The device WebSocket endpoint is `ws://127.0.0.1:8765/ws`. A phone needs a reachable host address or authenticated HTTPS endpoint; its own `localhost` is not the laptop.
 
-| Call | Body | Returns |
-|---|---|---|
-| `POST /api/ask` | `{"question": "what is usually in my fridge?"}` | `{"question", "answer", "ts", ...}` (Gemini, from all memories) |
-| `POST /api/note` | `{"text": "..."}` | `{"ok": true}`: stores a line as if the band heard it |
-| `GET /api/memories?limit=200` | | memories, newest first: `kind`, `text`, `people`, `importance`, `context`, `ts` |
-| `GET /api/heard?limit=100` | | the transcript with band context (`activity`, `steps`, `bookmarked`) |
-| `GET /api/context` | | the band right now: `activity`, `steps`, `battery`, `connected`, `mic`, `backend` |
+### Connect real hardware
 
-Two hubs, one backend. The band talks only to the laptop. The glasses talk only to the iPhone. The backend talks to both over one WebSocket server and is the only place with logic.
+* **Phone hub:** [`mobile/`](mobile/) contains the Expo app and native Meta glasses module. Hardware use needs a native development build; Expo Go alone does not provide the custom Meta module. See the [native build workflow](.github/workflows/mobile-ios.yml).
+* **Glasses app:** [`ios/README.md`](ios/README.md) covers the standalone Swift app, SDK registration, permissions, signing, and camera modes.
+* **Laptop band path:** the event's `vexo-open-kit/` checkout is required. [`app.py`](app.py) owns the band connection and forwards audio and events through [`recall/relay.py`](recall/relay.py). Set `BACKEND_WS_URL` to the backend's authenticated band URL. Do not run a second process against the same band.
 
-## Who does what
+For spoken requests, use **“BrightBlind, …”**. With `REQUIRE_WAKE_WORD=1`, unaddressed speech can be remembered without causing a camera request or spoken reply. The name alone opens a short window for the next sentence; a double tap also opens a request window.
 
-### Ismaël: band → laptop → backend (`band/`)
+### Configure services
 
-- Connect the Vexo Open band to the laptop with the kit (`vexo-open-kit`, Python, `bleak`). Band number is on the bag. Double tap before every connect, one program at a time, close the dashboard tab first.
-- Turn on `audio`, `events`, `activity`. Forward to the backend over WebSocket:
-  - audio: Opus packets as they come (50/s, 16 kHz mono, 20 ms each), or PCM decoded with the kit's `PcmDecoder` if the backend wants PCM. Agree with Tarang on which.
-  - `tap`, `double-tap`, `free-fall` events.
-  - `activity` state (`still`, `walk`, `run`) once a second.
-- Accept `led` commands from the backend (colour feedback is useless for the user but great for the demo: blue = listening, green = looking, red = fall).
-- Auto-reconnect when the link drops (the kit has it). Must survive the band going out of range for ten seconds.
-- Deliverable by 14:00: `python3 band/relay.py <band number>` streams audio and events to the backend and prints what it sends.
-- **Recall, the memory layer** (`app.py`, `recall/`): see "Memory layer" under Architecture. Run it with
-  `.venv\Scripts\python.exe app.py --usb --port COM5` (or `--sim` with no band), then open
-  `http://localhost:8100`. Keys go in `.env` (copy `.env.example`): `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`.
-- **The band relay is built into Recall** (`recall/relay.py`), so one program holds the band and does both jobs.
-  Add `--backend "wss://<backend host>/ws?token=<band relay token>"` (or set `BACKEND_WS_URL` in `.env`): it sends
-  `hello`, `audio` (`pcm_b64`, 16 kHz s16le as `backend/` prefers, with its own increasing `seq`; `--backend-opus`
-  for raw Opus), `event` (`tap`, `double-tap`, `free-fall`, `tilt`) and `activity` exactly as in the contract
-  below, reconnects by itself, and runs `led` commands. The band refuses `led` while its microphone is on
-  (kit rule 4), and the microphone is on whenever audio is forwarded.
-  With a backend connected, Recall stays silent and leaves double-tap to the backend (one voice, in the glasses);
-  it keeps transcribing, storing and bookmarking (tap). `--sim --backend ...` tests it with no band.
-- **The backend asks the Recall on Railway** when its planner picks `memory`. Only the laptop hears the band, so
-  the laptop copies its memory there as it goes (`recall/mirror.py`): every stored line with what the body was
-  doing, and every tap. Set `RECALL_CLOUD_URL=https://<service>.up.railway.app` and `RECALL_CLOUD_TOKEN=<the
-  Railway service's RECALL_TOKEN>` in the laptop's `.env` (add `--mirror-backfill` once to send what is already
-  there). Lines wait while Railway is unreachable. In the backend's `.env`:
-  `RECALL_WS_URL=wss://<service>.up.railway.app/ws` and `RECALL_TOKEN=<the same Railway token>`. The Railway
-  Recall needs its own `GEMINI_API_KEY` to distill and answer (`DEPLOY.md`). An answer that takes more than 20 s
-  (a rate-limited Gemini) comes back as "my memory is busy", inside the backend's 25 s limit.
-- Fallback without Railway: `--tunnel` gives the laptop's Recall a public `https://….trycloudflare.com` address
-  (needs `cloudflared`), guarded by `RECALL_TOKEN`; the address changes on every start.
-- **Everything on one laptop (local demo)**, the backend being the brain:
-  1. `.env` holds `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`, the relay tokens `BAND_RELAY_TOKEN`, `GLASSES_RELAY_TOKEN`,
-     `DASHBOARD_TOKENS` (24+ characters each) and `BACKEND_WS_URL=ws://127.0.0.1:8765/ws?token=<BAND_RELAY_TOKEN>`.
-  2. `backend\.venv\Scripts\python.exe run_backend_local.py`: the team backend on 127.0.0.1:8765, with the memory
-     and the shelf Guide, wake word on. Without the `ffmpeg` command it encodes the glasses' MP3 with PyAV.
-  3. `.venv\Scripts\python.exe app.py`: the band over Bluetooth (it waits up to 2 minutes for a double-tap), relayed
-     to the backend. `--usb --port COM5` for the cable.
-  4. `cloudflared tunnel --url http://127.0.0.1:8765`: the glasses connect to
-     `wss://<tunnel>/ws?token=<GLASSES_RELAY_TOKEN>`, and every answer and Guide direction plays in the glasses.
-- **Without the backend, Recall can drive the glasses itself** (`recall/glasses.py`): Andrii's app connects to
-  `wss://…/glasses?token=…` (printed with `--tunnel`). Answers then play in the glasses, and a tap also takes a
-  photo that Gemini describes into a memory.
+| Variable | Purpose |
+| :--- | :--- |
+| `DEEPGRAM_API_KEY` | Flux speech recognition and Deepgram speech output through Pipecat. |
+| `GEMINI_API_KEY` | Gemini vision, planning, item comparison, and memory. |
+| `GOOGLE_MAPS_API_KEY` | Routes API transit requests; Maps requires its own enabled API and suitable credentials. |
+| `GEMINI_MODEL`, `GEMINI_THINKING_LEVEL` | Default: `gemini-4-hydrogen`, `LOW`. |
+| `DEEPGRAM_TTS_ENGINE`, `DEEPGRAM_AURA_VOICE` | Default: `aura_http`, `aura-2-thalia-en`. |
+| `BAND_RELAY_TOKEN`, `GLASSES_RELAY_TOKEN` | Separate credentials for the two device roles. |
+| `DASHBOARD_TOKENS` | Access to protected dashboard data and commands. |
+| `LIVE_ONLY` | Default `1`: require the relevant real device connection and configured providers. |
+| `REQUIRE_WAKE_WORD` | Set `1` to require the spoken name or an opened request window. |
+| `WARM_STREAM` | Optional `1` keeps the camera ready between requests at the cost of additional camera use. |
+| `BACKEND_DATA_DIR` | SQLite memory, events, and session logs; use persistent storage in a deployment. |
 
-### Tarang: backend + agents (`backend/`)
+ElevenLabs is an optional speech provider, not a requirement for the default workflow. See [`backend/.env.example`](backend/.env.example) for the full configuration. Never commit keys, private relay URLs, recordings, or session data.
 
-- One WebSocket server with two kinds of clients, `band` and `glasses`. Message contract is below. This is the one file everyone depends on, so write it first and keep it stable.
-- Voice loop on **Pipecat**: band audio in → Deepgram streaming STT → LLM → ElevenLabs TTS → audio out to the glasses client. Pipecat is a sponsor track, so the voice path must really run through it.
-- Agents (Pipecat pipeline or Mastra, your call):
-  - **Planner**: reads the transcript, decides whether the request needs eyes, which scene it is, and whether to capture one photo or start a stream.
-  - **Vision**: Gemini on the photo or on sampled frames. Returns structured facts (items in fridge, bus numbers in frame, position of the target on the shelf relative to the hand).
-  - **Transit**: Google Maps Directions / Transit for the bus scene, arrival time, line number.
-  - **Researcher**: web lookup when the answer needs facts not in the frame (what is usually in a fridge for this user, product names).
-- Scene logic: fridge (one photo), bus (stream from T-60 s, stop after boarding), shelf (stream, compare target position to hand position, speak a direction every ~2 s, stop on "got it").
-- Dashboard for judges: a web page that shows the live transcript, the frames the agent chose to look at, and what each agent decided. This is how we prove "meaningful use of AI agents" in three minutes.
-- Deliverable by 14:00: server accepts both clients, echoes a spoken answer to a typed question. By 16:00: all three scenes.
+### Deploy
 
-### Andrii: glasses → iPhone → backend (`ios/`)
+The coordinator's deployment root is **`backend/`**, using [`backend/Dockerfile`](backend/Dockerfile) and `/healthz`. Configure secrets in the hosting environment and use persistent storage for the data directory.
 
-- Swift app on iPhone using the Meta Wearables Device Access Toolkit (`meta-wearables-dat-ios` 1.0.1). Built in GitHub Actions on `macos-26`, signed and installed from Linux with Impactor/plumesign (no Mac in the team). Scaffold (XcodeGen `project.yml`, `build.yml`, DAT session boilerplate) is copied from Andrii's own public repo `andriidrok1/glasses-tutor`; all product code is written today.
-- The app is a dumb relay, no logic:
-  - Session with `SpecificDeviceSelector`, camera attached, Inputs attached (capture button on the glasses as a backup trigger).
-  - On `capture`: `stream.capturePhoto(.jpeg)` if streaming, else standalone `Photo` capture; send the JPEG to the backend.
-  - On `stream on`: HEVC stream (`hvc1`, 504x896, 7 fps), sample 1–2 frames per second, send as JPEG. On `stream off`: stop.
-  - On `say`: play the audio (or text via `AVSpeechSynthesizer` as fallback) through the Bluetooth route, which is the glasses' speakers.
-  - Keep the screen awake, run under Guided Access, phone stays in the pocket.
-- Wi-Fi: DAT streams over a Wi-Fi network hosted by the glasses. Needs `NSLocalNetworkUsageDescription`, `NSBonjourServices` and the Hotspot Configuration entitlement. iOS keeps internet on cellular while joined to that Wi-Fi, so the phone needs mobile data. If the entitlement is not available on the signing account, fall back to photos over Bluetooth (2–5 s per photo at medium quality, proven).
-- Deliverable by 13:00: app connects to backend, `capture` returns a photo, `say` is heard in the glasses. By 15:00: streaming.
+The [backend setup guide](backend/README.md) and [Compose configuration](backend/compose.yaml) cover deployment. [`DEPLOY.md`](DEPLOY.md) describes the separate Recall service. The repository's root Dockerfile is for that service, not the coordinator.
 
-## WebSocket contract (v0, Tarang owns it)
+## Repository structure
+
+```text
+backend/                 Pipecat voice pipeline, agents, memory, dashboard and tests
+ios/                     Standalone Swift glasses app using Meta DAT 1.0.1
+mobile/                  Expo app with native glasses and band integrations
+recall/                  Laptop memory service, band relay and cloud fallback
+app.py                   Laptop entry point for the Vexo band
+run_backend_local.py     Local launcher using the root environment file
+docs/                    Demo storyboard and project notes
+sponsor-docs/            Provider setup and technical references
+.github/workflows/       Recall deployment and native app builds
+```
+
+## Tests
+
+From `backend/`:
+
+```sh
+.venv/bin/python -m unittest discover -v
+```
+
+Automated tests use isolated fixtures to check message contracts, authentication, capture correlation, stale results, speech encoding, transit timing, and obstacle descriptions. They are not evidence of physical hardware performance. Live diagnostic scripts call real services and use the configured account's quota or credits.
+
+## Status and limits
+
+BrightBlind is a working prototype with real provider integrations and recorded checks, not a validated navigation system.
+
+* Google Maps returns transit estimates. A bus-number match does not confirm safe boarding, and an expired estimate is not the next bus.
+* Vision can miss objects or misread text. It does not establish depth, step height, safe clearance, or a clear walking path.
+* A product being absent from a photo does not prove it is absent from the whole fridge or shelf.
+* Memory depends on what was captured and transcribed. Missing context should remain missing, rather than being invented.
+* Battery impact and consistent complete-loop latency still need measurement across real hardware sessions.
+* The backend serves one shared wearer session. Relay authentication is implemented; it is not a complete multi-tenant account system.
+
+## Development notes
+
+Coordinate work through the existing [team board](https://github.com/ismaelmehdid/BrightBlind/issues/2). Keep changes focused to the assigned component and agree on device-contract changes before implementing them. The contract below remains the common reference for the two relays.
+
+<details>
+<summary><strong>WebSocket contract v0</strong></summary>
 
 One server, path `/ws`. Every message is a JSON text frame: `{"type": "...", "ts": <ms since epoch>, ...}`. Binary payloads are base64 inside JSON for now (simple beats fast today). First message from any client is `hello`.
 
@@ -161,81 +259,13 @@ Backend → client:
 
 If you need a field that is not here, add it to this table in the same commit as the code.
 
-## Repo layout
+</details>
 
-```
-band/        Ismaël   Python relay for the Vexo Open band (kit is a git submodule or a copy, see band/README.md)
-app.py       Ismaël   Recall: runs the memory layer on the laptop with the band
-recall/      Ismaël   Recall: memory store, Gemini brain, Pipecat voice, local page; cloud.py + Dockerfile,
-                      railway.json, .github/workflows/backend.yml deploy it to Railway
-backend/     Tarang   WebSocket server, Pipecat pipeline, agents, dashboard
-ios/         Andrii   Swift relay app, XcodeGen project, GitHub Actions build
-mobile/      Ismaël   Expo control app (Expo Go): band + glasses status, burst control, live agent steps and photos
-                      from Recall's /ws, plus the team backend's /api/state when given its URL and dashboard token.
-                      Run: cd mobile; npx expo start --tunnel ngrok, scan the QR code with Expo Go
-docs/        all      contract.md (this table, kept in sync), demo script, judging notes
-```
+<details>
+<summary><strong>Scaffold and hardware notes</strong></summary>
 
-Stay in your folder. The only shared file is the contract table above (mirrored in `docs/contract.md`). If you change it, say so in the team chat.
+The Meta integration began from the public [glasses-tutor scaffold](https://github.com/andriidrok1/glasses-tutor) and uses Meta's Device Access Toolkit 1.0.1. The band integration uses the event's `vexo-open-kit`.
 
-## How we work today (the pipeline)
+Native SDK signatures and permissions must be checked against the version in the project. Streaming and standalone photo modes have different startup and transfer behavior. Existing internal bundle identifiers, URL schemes, and build target names may retain their original names for compatibility.
 
-Six stages, adapted from Andrii's hackathon pipeline (Notion: "Universal pipeline for hackathon"). Stages 1–3 are done and live in this file; 4–6 are what the rest of the day looks like.
-
-1. **Idea.** Done: BrightBlind, three demo scenes above. Everything is built backwards from the 2-minute demo. If a feature is not in a scene, it does not get built.
-2. **Explain it to the agent.** Done: this README is the explanation. Every new agent session starts by reading it; if the agent's summary of the project does not match yours, fix the README, not the agent.
-3. **Architecture.** Done: two hubs, one backend, one WebSocket contract. `README.md` plays the role of `PLAN.md`. A feature that needs a new message type goes through the contract table and the board first.
-4. **Ready-made components.** Nobody styles buttons today. The judges' dashboard (`backend/`) is shadcn/ui for the base, Magic UI or Aceternity for the first screen. Band code comes from `vexo-open-kit` examples. The glasses session is copied from Andrii's public scaffold.
-   Prompt: `Build the UI with shadcn/ui. For the first screen use Magic UI / Aceternity components. Don't write styles from scratch if an existing component already does the job.`
-5. **Building.** Three agents in parallel, one per folder, because the slices do not share files (`band/`, `backend/`, `ios/`). The one shared thing is the contract table; changes to it go on the board. After every step the human opens the result and checks it, no "done" on trust. Before a merge into `main`, run a reviewer agent that did not write the code:
-   `You didn't write this code. Go through <folder/feature> and find bugs, broken flows and anything that will break during the demo. Don't fix anything, give me a list with file and line.`
-6. **Presentation.** Feature freeze at 17:00. After that only: bugs visible in the demo flow, the backup video, the pitch (problem, solution, live demo, what's next), two full dry runs out loud.
-   Prompt at 17:00: `Submission is in one hour. We're not adding features. Help me with: 1) bugs visible in the demo flow, by priority; 2) a structure for a 3-minute pitch; 3) a step-by-step script for recording the demo video.`
-
-Two habits from the pipeline that pay off most here: walk up to the judges and sponsors and ask what they want to see (Vexo, Mastra and Pipecat people are in the room), and decide the demo before building anything.
-
-## Team board
-
-One pinned issue is the board: https://github.com/ismaelmehdid/BrightBlind/issues/2. Post before you touch another folder or the contract table; address with `@ios`, `@backend`, `@band`.
-
-    tools/board post "@backend contract: photo now carries req_id"
-    tools/board unread        # new posts since you last read
-    tools/board wait          # keep in a terminal, prints new posts every 30 s
-
-Needs `gh auth login` and collaborator access to the repo. The script is 40 lines of bash over `gh`, written today.
-
-## Rules we must not break
-
-- All code written after 9:00 AM today. Scaffolding copied from a public repo must be named in the README (done above for `ios/`).
-- Public repo. No API keys in commits: keys live in `.env` files that are in `.gitignore`. Team keys (Deepgram, OpenAI, Gemini, ElevenLabs) come from the sponsor channels on Discord.
-- Submission before 6:00 PM Pacific: this repo, a video demo, a Devpost entry. Final commits before 6:00 PM. Judges want a live in-person demo.
-- Tracks we enter: Best Overall, Best Voice Use Case on Pipecat, Best Use of Gemini 4, Best ElevenLabs Project. Each needs the sponsor's tool to be genuinely on the path, not decorative.
-
-## Timeline
-
-| Time | Milestone |
-|---|---|
-| 12:00 | Contract agreed. Each folder has a README with how to run. |
-| 13:00 | Glasses relay: `capture` and `say` work end to end. Band relay: audio and taps reach the backend. |
-| 14:00 | Backend: typed question → spoken answer in the glasses. First full loop: say "what is in front of me", hear the answer. |
-| 15:00 | Fridge scene works. Streaming from the glasses works (or BLE photo fallback decided). |
-| 16:00 | Bus and shelf scenes. |
-| 17:00 | Feature freeze (stage 6). Only demo-flow bugs, video, pitch, dry runs. |
-| 16:00–17:00 | Record the video. Write Devpost. |
-| 17:30 | Final push. Rehearse the 3-minute demo twice. |
-
-## For AI coding agents
-
-If a teammate pointed you at this file, you are working on one of the three parts. Before you write code:
-
-0. Run `tools/board unread` and read what the other two posted. Before you change the WebSocket contract or anything outside your folder, post on the board (`tools/board post "@who ..."`) and wait for the human to say go.
-
-1. Ask which role you are helping: `band/` (Ismaël), `backend/` (Tarang) or `ios/` (Andrii). Work only inside that folder.
-2. Read the WebSocket contract above. Your code must send and accept exactly those message types. Do not invent new ones silently; if one is missing, add it to the table in `docs/contract.md` and tell the human.
-3. Keep the live loop's logic in `backend/`. The exception is Recall (`app.py`, `recall/`, Ismaël's): the memory
-   layer has its own Pipecat pipeline and Gemini calls. The band relay and the glasses relay are dumb pipes: they forward data up and execute commands down. Do not put scene logic, prompts or model calls in `band/` or `ios/`.
-4. Never write an API key into a file that is tracked by git. Read keys from environment variables or `.env`.
-5. For `band/`: the kit is the source of truth, `vexo-open-kit/AGENTS.md` and `vexo-open-kit/docs/api.md`. Ask for the band number, never guess it. One program on the band at a time.
-6. For `ios/`: the SDK is `meta-wearables-dat-ios` 1.0.1. Check signatures against the `.swiftinterface` files in the xcframework, not from memory. Session only via `SpecificDeviceSelector`. Order: `addCamera` → `stream.start` → on `.streaming` attach photo and inputs. Builds run in GitHub Actions; there is no Mac, so every build costs 15–20 minutes: batch changes.
-7. For `backend/`: the voice path must run through Pipecat with Deepgram STT and ElevenLabs TTS. Vision calls go to Gemini. Expose what every agent decided on the dashboard; judges score "meaningful use of AI agents".
-8. Prefer the smallest thing that demos. A scene that works at 504x896 with a 3-second delay beats a scene that would be perfect at 1080p and is not finished by 16:00.
+</details>
