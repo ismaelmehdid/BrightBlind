@@ -14,7 +14,14 @@ from memory import Memory
 
 
 # Sentences that are clearly a request to the device, accepted without the wake word or a double tap.
-WAKE_WORD = re.compile(r"\b(?:hey\s+|ok(?:ay)?\s+)?(?:bright\s*(?:blind|blinds|blond|blonde|line|lines|blend|light|lights)|brightblind)\b", re.I)
+# Wake word and what Deepgram turns it into in a noisy room (seen today: brightblinds, brother blind,
+# broadblind, bradline, breadbread, budlind). First part sounds like "bright", second like "blind".
+WAKE_WORD = re.compile(
+    r"\b(?:hey\s+|ok(?:ay)?\s+)?(?:"
+    r"(?:bright|brite|bryte|brights|bride|brat|brad|broad|bread|brought|brother|braid|bud|pride|right)[\s-]*"
+    r"(?:blind|blinds|blinded|bline|blend|blond|blonde|bland|lind|line|lines|lined|light|lights|bind|behind|bread)"
+    r"|bright\s*(?:mind|wind|find)"
+    r")\b", re.I)
 DIRECT_REQUEST = re.compile(
     r"\bwhat(?:'s| is| kind of| type of)?\b.*\b(am i holding|in my hand|in front of me|around me|am i looking at)\b"
     r"|\bis (this|it) (what|the one|the right)\b"
