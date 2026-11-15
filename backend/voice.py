@@ -128,7 +128,7 @@ class Voice:
             from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
             stt = DeepgramFluxSTTService(api_key=os.environ['DEEPGRAM_API_KEY'], sample_rate=16000,
                 mip_opt_out=True, settings=DeepgramFluxSTTService.Settings(model='flux-general-en', eot_threshold=.75,
-                    keyterm=['BrightBlind', 'Bright Blind', 'Second Vision', 'exit', 'holding', 'fig bar']),
+                    keyterm=[term.strip() for term in os.getenv('STT_KEYTERMS', 'BrightBlind,Bright Blind,what am I holding,fig bars,raspberry,blueberry,raspberry fig bars,blueberry fig bars,Doritos,exit').split(',') if term.strip()]),
                 enable_eager_end_of_turn=False)
             processors.append(stt)
         processors.append(PlannerInput(coordinator))
