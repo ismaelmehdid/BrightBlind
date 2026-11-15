@@ -54,6 +54,7 @@ class Coordinator:
         self.recent_lines = []
         self.fresh_frame = None
         self.want_frame = None
+        self.find_step = 0; self.find_wait_until = 0; self.find_closer = 0
         self.trace = None
         self.quiet_replies = False     # True while the current request came from the band: no "I didn't catch that" chatter
         self.warm_until = 0            # keep the glasses stream on until then: a still from a live stream takes ~2 s, a cold photo 3-6 s
@@ -261,7 +262,7 @@ class Coordinator:
                 await self.say('I’m checking Google Maps for the bus route.')
                 self.route_version += 1
                 self.spawn(self.transit(plan['origin'], plan['destination'], self.route_version)); return
-            if scene not in ('fridge', 'label', 'bus', 'shelf', 'scene', 'exit', 'match'): raise RuntimeError('Planner returned an unsupported action.')
+            if scene not in ('fridge', 'label', 'bus', 'shelf', 'scene', 'exit', 'match', 'find'): raise RuntimeError('Planner returned an unsupported action.')
             self.epoch += 1
             self.pending.clear()
             if self.streaming and scene in ('fridge', 'label', 'match'):
@@ -274,6 +275,7 @@ class Coordinator:
             else:
                 # The agent ends the session itself (answer given, goal reached, "stop"); this is only a safety cap.
                 self.last_summary, self.last_key, self.last_said = '', None, 0
+                self.find_step, self.find_wait_until, self.find_closer = 0, 0, 0
                 await self.stream(self.epoch, 180)
         except Exception as error:
             self.log('Planner', 'failed', str(error) if isinstance(error, RuntimeError) else type(error).__name__)
@@ -400,7 +402,10 @@ class Coordinator:
         if self.trace and 'frame' not in self.trace:
             self.trace.update(frame=started, frame_age_ms=round(time.time() * 1000 - captured_at))
         try:
-            if scene == 'match':
+            if scene == 'find':
+                if time.monotonic() < self.find_wait_until: return        # the wearer is still moving their head
+                result = await self.providers.find(image, target, self.memory.context())
+            elif scene == 'match':
                 result = await self.providers.match(image, target, self.memory.context())     # eyes + memory, one call
             else:
                 result = await self.providers.vision(scene, image, target)
@@ -427,6 +432,26 @@ class Coordinator:
                 matched = any(re.search(r'(?<!\w)' + re.escape(self.bus['line']) + r'(?!\w)', item, re.I) for item in result['visible']) if self.bus['line'] else False
                 summary += ' The visible number matches the planned line; confirm the direction and boarding with the driver.' if matched else ' I have not confirmed a match to your planned bus.'
             if self.trace and 'answer' not in self.trace: self.trace['answer'] = time.monotonic()
+            if scene == 'find':
+                # The agent keeps watching the stream and steers the head until it finds the item or has looked
+                # in front, to the right and to the left.
+                status = result['status']
+                if status == 'found':
+                    self.log('Guide · Gemini', 'goal_reached', summary)
+                    await self.stop(); await self.say(summary); return
+                if status == 'closer' and self.find_closer < 2:
+                    self.find_closer += 1
+                    self.find_wait_until = time.monotonic() + 3.5
+                    await self.say("I can't read the labels. Move your head closer."); return
+                self.find_closer = 0
+                self.find_step += 1
+                self.find_wait_until = time.monotonic() + 4
+                wanted = result['wanted']
+                if self.find_step == 1: await self.say(f"The {wanted} is not in front of you. Turn your head to the right, I'll check.")
+                elif self.find_step == 2: await self.say("Not there. Turn your head to the left, maybe it's over there.")
+                else:
+                    await self.stop(); await self.say(f"I looked in front, right and left. I don't see the {wanted}.")
+                return
             if scene == 'match':
                 self.log('Researcher · Recall', 'evidence', summary, item=', '.join(result['visible']))
                 await self.say(summary)

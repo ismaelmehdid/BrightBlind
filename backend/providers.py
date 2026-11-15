@@ -62,6 +62,9 @@ class Providers:
         # Explicit requests do not need a model round trip; novel phrasing still uses Gemini.
         if re.search(r'\b(obstacles?|blocking|chairs?|hazards?)\b|\bin my way\b|\bclear path\b', text, re.I):
             return {'scene':'scene', 'target':text, 'reply':'Describe visible potential obstacles; do not direct walking.', 'source':'explicit command'}
+        if not re.search(r'\b(holding|in my hand)\b', text, re.I) and re.search(r'\b(in front of me|on the table|is it here|right here|is there|which one|where is)\b', text, re.I) \
+                and re.search(r'\b(right one|the one|asked|want(s|ed)?|fig bars?|bars?|it)\b', text, re.I) and not re.search(r'\b(exit|door|bus)\b', text, re.I):
+            return {'scene': 'find', 'target': text, 'reply': 'Search the view for the requested item and guide the head.', 'source': 'explicit command'}
         if re.search(r'\b(holding|in my hand)\b', text, re.I) or (re.search(r'\b(is (this|it)|does (this|it))\b', text, re.I) and re.search(r'\b(want(s|ed)?|asked|ask for|need(s|ed)?|told me|right one)\b', text, re.I)):
             return {'scene': 'match', 'target': text, 'reply': 'Identify the item in view and compare it with memory.', 'source': 'explicit command'}
         if re.search(r'\b(exit|way out|get out|leave|door)\b', text, re.I):
@@ -81,9 +84,9 @@ class Providers:
             return {'scene': 'transit', 'origin': route[1], 'destination': route[2], 'target': '', 'reply': 'Plan the supplied route.', 'source': 'explicit command'}
         return await self.gemini(
             'Choose one operation for this wearable request: ' + json.dumps(text) +
-            '. fridge=inspect refrigerator contents; label=read a label, price, document or sign in one photo; bus=read bus numbers; shelf=find a named product; exit=find the exit or a door out of the room; match=identify the item the wearer holds or looks at and compare it with what someone asked for or what they remember; scene=describe surroundings including visible stairs; transit=plan between explicit addresses; memory=recall personal information; stop=end camera session. For transit extract only explicit origin/destination, otherwise leave empty and ask. No instructions to move a foot, hand, cross a road or board a bus. Reply briefly for unsupported requests.',
+            '. fridge=inspect refrigerator contents; label=read a label, price, document or sign in one photo; bus=read bus numbers; shelf=find a named product; exit=find the exit or a door out of the room; find=search the table or shelf in view for the item someone asked for and say where it is; match=identify the item the wearer holds or looks at and compare it with what someone asked for or what they remember; scene=describe surroundings including visible stairs; transit=plan between explicit addresses; memory=recall personal information; stop=end camera session. For transit extract only explicit origin/destination, otherwise leave empty and ask. No instructions to move a foot, hand, cross a road or board a bus. Reply briefly for unsupported requests.',
             {'type': 'OBJECT', 'required': ['scene', 'target', 'origin', 'destination', 'reply'], 'properties': {
-                'scene': {'type': 'STRING', 'enum': ['fridge', 'label', 'bus', 'bus_timing', 'shelf', 'exit', 'match', 'scene', 'transit', 'memory', 'stop', 'reply']},
+                'scene': {'type': 'STRING', 'enum': ['fridge', 'label', 'bus', 'bus_timing', 'shelf', 'exit', 'find', 'match', 'scene', 'transit', 'memory', 'stop', 'reply']},
                 **{name: {'type': 'STRING'} for name in ['target', 'origin', 'destination', 'reply']}}})
 
     async def guide(self, image, target):
@@ -144,6 +147,29 @@ class Providers:
             description = "I don't see the exit yet. Turn slowly."
         return {'description': description, 'visible': [landmark] if landmark else [], 'hazards': [], 'uncertain': not found,
                 'found': found, 'position': result.get('position', 'none'), 'action': 'answer' if found else result.get('action', 'turn')}
+
+    async def find(self, image, target, memory):
+        """Search scene: several products lie in view; is the requested one among them, and where."""
+        result = await self.gemini(
+            'Glasses camera photo. The wearer cannot see. Several products may lie on a table in front of them. '
+            'From the notes below work out which product someone asked for (exact flavour or variant: blueberry is not raspberry). '
+            f'Their question: {json.dumps(target)}.\n\n{memory}\n\n'
+            'Look for that product in the photo. status: '
+            '"found" = it is clearly visible and its label is readable; give position = left, center or right of the image. '
+            '"closer" = products are visible but too small or blurred to read their labels. '
+            '"absent" = labels are readable (or nothing is on the table) and the requested product is not in this view. '
+            'wanted = the requested product in a few words. seen = product names you can read, at most 5.',
+            {'type': 'OBJECT', 'required': ['status', 'position', 'wanted', 'seen'], 'properties': {
+                'status': {'type': 'STRING', 'enum': ['found', 'closer', 'absent']},
+                'position': {'type': 'STRING', 'enum': ['left', 'center', 'right', 'none']},
+                'wanted': {'type': 'STRING'}, 'seen': {'type': 'ARRAY', 'items': {'type': 'STRING'}}}}, image)
+        wanted = re.sub(r'[^A-Za-z0-9 \'-]', '', str(result.get('wanted', '')))[:60].strip() or 'it'
+        seen = [str(item)[:80] for item in (result.get('seen') or [])[:5]]
+        status = result.get('status') if result.get('status') in ('found', 'closer', 'absent') else 'closer'
+        if status == 'found' and result.get('position') not in ('left', 'center', 'right'): status = 'closer'
+        side = {'left': 'on your left', 'center': 'right in front of you', 'right': 'on your right'}.get(result.get('position'), '')
+        return {'status': status, 'position': result.get('position', 'none'), 'wanted': wanted, 'visible': seen, 'hazards': [],
+                'uncertain': status != 'found', 'description': f'Found it. The {wanted} is {side}.' if status == 'found' else status}
 
     async def match(self, image, target, memory):
         """One call for eyes + memory: what is in the hand, and is it what someone asked for."""
