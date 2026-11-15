@@ -2,9 +2,10 @@
 
 <h1>
   <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/brightblind-logo.png">
-    <img src="assets/readme/brightblind-logo.gif" alt="BrightBlind" width="240" height="60">
+    <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/brightblind-symbol.png">
+    <img src="assets/readme/brightblind-symbol.gif" alt="" width="40" height="40">
   </picture>
+  BrightBlind
 </h1>
 
 **BrightBlind connects the conversations you remember with the world in front of you.**
