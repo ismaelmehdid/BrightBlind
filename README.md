@@ -76,34 +76,24 @@ BrightBlind supports camera activation on demand. For rapid follow-up questions,
 
 ## Architecture
 
+**Two wearables, one connection app, one backend.**
+
 ```mermaid
 flowchart LR
-    Band["Vexo band<br/>speech · taps · activity"] --> Hub["Phone or laptop hub"]
-    Glasses["Meta glasses<br/>camera · speakers"] <--> Phone["Native iPhone app"]
-    Hub --> Socket["Backend /ws"]
-    Phone <--> Socket
-
-    subgraph Backend["Python backend"]
-        Socket --> Voice["Pipecat<br/>Deepgram Flux STT"]
-        Voice --> Planner["Request planner"]
-        Planner --> Vision["Gemini<br/>vision · item comparison"]
-        Planner --> Transit["Google Maps<br/>routes · departure estimates"]
-        Planner <--> Memory["Recall memory<br/>SQLite · Gemini"]
-        Vision --> Reply["Short spoken answer"]
-        Transit --> Reply
-        Memory --> Reply
-        Reply --> Speech["Pipecat<br/>Deepgram Aura TTS"]
-        Speech --> Socket
-    end
-
-    Backend --> Dashboard["Dashboard<br/>frames · decisions · timing"]
+    Band["Vexo band<br/>Hears the request"] --> App["BrightBlind app<br/>Connects the wearables"]
+    Glasses["Meta glasses<br/>Camera and speakers"] <--> App
+    App <--> Backend["BrightBlind backend<br/>Voice · Vision · Memory · Maps"]
 ```
 
-**Pipecat and Deepgram are on the actual voice path.** Deepgram Flux transcribes band audio; Pipecat carries the request through the backend; Deepgram Aura generates the spoken response. Gemini handles visual reasoning and memory tasks. Google Maps supplies transit data.
+1. **You ask.** Vexo sends the spoken request through the connection app.
+2. **BrightBlind decides what it needs.** Pipecat coordinates the voice workflow, and Deepgram transcribes the speech. The backend selects vision, memory, or transit information.
+3. **The right information comes back.** If a view is needed, the backend asks the glasses for a photo or stream. Gemini analyzes the image and context; Google Maps provides route and departure estimates when requested.
+4. **You hear the answer.** Deepgram generates speech, and the app plays it through the glasses.
 
-The native app carries images and audio between the glasses and backend. The Vexo band can connect through the native phone integration or through the laptop's Recall process. One process should own the band's connection at a time.
+The diagram shows the native phone app path. In the laptop setup, the laptop forwards the band's audio directly to the same backend while the iPhone connects the glasses. The backend's responsibilities stay the same.
 
-### The agents
+<details>
+<summary><strong>What runs inside the backend</strong></summary>
 
 | Component | Responsibility | Source |
 | :--- | :--- | :--- |
@@ -114,6 +104,8 @@ The native app carries images and audio between the glasses and backend. The Vex
 | Voice | Recognize speech, generate audio, handle interruptions, and encode replies for the glasses. | [`voice.py`](backend/voice.py) |
 
 The dashboard shows selected frames and the work behind the answer. Session logs record agent events and timing; they are stored in the configured data directory, not in the repository.
+
+</details>
 
 ## Engineering decisions
 
