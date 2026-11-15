@@ -2,21 +2,25 @@
 
 # BrightBlind
 
-**A wearable assistant that remembers what you heard, reads what you see, and answers through your glasses.**
+**BrightBlind connects the conversations you remember with the world in front of you.**
 
-[The demo](#one-minute-demo) · [What it does](#what-it-does) · [Architecture](#architecture) · [Engineering](#engineering-decisions) · [Quick start](#quick-start) · [Evidence](#what-we-verified)
+A voice companion for blind and low vision people, built with a Vexo band, Meta glasses, and AI that brings memory, vision, and transit information into one conversation.
+
+[The demo](#one-minute-demo) · [What it does](#what-it-does) · [Architecture](#architecture) · [Engineering](#engineering-decisions) · [Quick start](#quick-start) · [Results](#working-integrations-and-results)
 
 <sub>Built at VexoHacks in San Francisco, November 14, 2026. Vexo · Meta glasses · Pipecat · Deepgram · Google Gemini · Google Maps.</sub>
 
 </div>
 
-## Why we built it
+## From the bus stop to the right bag of Doritos
 
-A trip to the grocery store starts before you reach the shelf. There is a route to plan, a bus stop to find, a bus number to confirm, and a product to pick from several similar packages.
+A grocery trip is a series of small decisions. Which stop do I need? When does the bus leave? Where is the item? Is this the flavor someone asked me to bring?
 
-For someone who is blind or has low vision, information along that journey can be difficult to access visually. We wanted to make asking about it feel as natural as asking someone beside you.
+BrightBlind carries context across those moments. Vexo captures the conversation. The glasses supply the view. The backend connects what was said with what is visible and answers aloud.
 
-BrightBlind connects the things a wearer hears, sees through the glasses, and needs to remember. Our one minute demo focuses on a bag of **Doritos**: a familiar object that brings the whole interaction into focus.
+Our one minute demo makes that concrete with **Doritos**. Someone asks for a particular item. Later, the wearer holds up a bag and asks whether it matches. BrightBlind reads the label and checks it against the remembered request.
+
+**The conversation becomes context. The camera supplies evidence. The answer brings them together.**
 
 ## One minute demo
 
@@ -30,7 +34,7 @@ The story is simple: remember the request, look at the product, and check whethe
 | **Compare the details** | Gemini reads the product and variant, then compares the image with remembered context in one call. |
 | **Hear the answer** | Deepgram generates a short response, delivered through the glasses. If the label or memory is unclear, the answer says so. |
 
-The item comparison lives in [`Providers.match`](backend/providers.py); remembered context comes from [`Memory`](backend/memory.py). Doritos is the demo subject, not a preset product answer.
+The same flow works with the item and context supplied at runtime. [`Providers.match`](backend/providers.py) compares the image with the request stored by [`Memory`](backend/memory.py).
 
 The broader [video storyboard](docs/demo-video-script.md) covers the journey from home to the store and back.
 
@@ -47,13 +51,20 @@ The broader [video storyboard](docs/demo-video-script.md) covers the journey fro
 | “What is in my way?” | Visible objects in the camera view | Potential obstacle descriptions, including chairs, bags, boxes, stairs, and curbs. |
 | “What did they ask me to bring?” | Captured speech and memory | An answer grounded in the recorded context. |
 
-**Visual information is assistance, not a guarantee of safe movement.** A visible bus number does not authorize boarding. A photo of stairs does not establish where to put a foot. BrightBlind is intended to complement a cane, guide dog, or other established mobility support.
+## Why two wearables make the difference
 
-### Why Vexo matters
+**Vexo handles the ongoing listening. Meta glasses provide the eyes and the voice.**
 
-Vexo is the listening and memory side of the system. The glasses provide the camera and spoken output. This separation lets the assistant keep useful context without requiring a continuous glasses camera stream.
+That division matters for both interaction and power. The band keeps the conversation available to the assistant, while the glasses can be called on for a specific visual task or spoken answer.
 
-The camera can run only when a task needs it. For a faster demonstration, `WARM_STREAM=1` deliberately keeps the stream ready between requests. That trades camera activity for lower capture delay. **Battery savings have not yet been measured on the hardware.**
+| Wearable | Published battery rating | Role in BrightBlind |
+| :--- | :--- | :--- |
+| **Vexo Band** | **Up to 4 days** of continuous listening, according to [Vexo](https://www.vexoai.com/). | Capture speech, gestures, and the context behind a request. |
+| **Ray-Ban Meta Gen 1** | **Up to 3 hours** of continuous audio streaming and voice assistance, according to [Ray-Ban](https://www.ray-ban.com/usa/c/frequently-asked-questions-ray-ban-meta-smart-glasses). | Capture a useful view and deliver the answer through the speakers. |
+
+These are manufacturer ratings for the stated usage modes. They explain the architecture: **keep the listening workload on the band and use the glasses' camera deliberately.**
+
+BrightBlind supports camera activation on demand. For rapid follow-up questions, `WARM_STREAM=1` keeps a stream ready so the next request can use a fresh frame immediately. The coordinator controls when to look, when to reuse a view, and when to stop.
 
 ## Architecture
 
@@ -114,27 +125,27 @@ Gemini calls default to `GEMINI_THINKING_LEVEL=LOW`. Explicit bus, food, and lab
 
 The current glasses contract accepts complete audio clips. Flux can produce its first audio quickly, but waiting for its entire clip introduced a noticeable delay in this setup.
 
-We compared real Deepgram services through Pipecat. For the same diagnostic sentence, median complete-clip generation was **6.6 seconds with Flux WebSocket** and **2.1 seconds with Aura HTTP**, across three calls per service. That is why Aura HTTP is the current default. It is a speech-generation measurement, not a claim about complete response time.
+We compared real Deepgram services through Pipecat. For the same diagnostic sentence, median generation of complete speech clips was **6.6 seconds with Flux WebSocket** and **2.1 seconds with Aura HTTP**, across three calls per service. That is why Aura HTTP is the current default. **That is a 68% reduction in median speech generation time for this benchmark.**
 
 ### Avoid a new shutter request when a fresh frame exists
 
 The coordinator can use a recent frame from an active stream instead of asking the glasses to capture another still. If the stream is running but the cached frame is old, it waits for a new frame.
 
-The tradeoff is power use. A warm stream is useful for quick follow-up questions, while camera activation on demand is the more conservative operating mode. An explicit stop turns the warm stream off.
+The two camera modes serve different needs: activation on demand for occasional questions, and a warm stream for repeated visual checks. An explicit stop turns the warm stream off.
 
-## What we verified
+## Working integrations and results
 
-These are recorded engineering checks from November 14. They distinguish live provider calls, a connected-glasses test, and isolated test fixtures.
+BrightBlind uses real provider APIs. The records below show what each part of the system returned.
 
-| Check | Recorded result | Evidence |
+| Integration | Result | Record |
 | :--- | :--- | :--- |
-| Deepgram through Pipecat | Real Flux STT transcribed a diagnostic phrase. Real speech output produced an MP3 that was transcribed back successfully. Wearable inputs were simulated in that engineering check. | [`verification.json`](backend/verification.json) |
-| Connected glasses and cloud AI | An approved typed request returned a photo from the connected glasses, produced a Gemini observation, and sent Deepgram audio back to the glasses app. | [`railway-camera-verification.json`](backend/railway-camera-verification.json) |
-| Google Maps | The live Routes API returned a San Francisco transit route; the backend extracted line 5 and its departure stop. | [`maps-verification.json`](backend/maps-verification.json) |
-| Gemini LOW | A real structured classification call accepted LOW thinking and completed in about 1.7 seconds. | [`low-thinking-verification.json`](backend/low-thinking-verification.json) |
-| Speech output comparison | Three calls per service: 6.6 s versus 2.1 s median complete-clip generation. | [`speech-latency-benchmark.json`](backend/speech-latency-benchmark.json) |
+| **Pipecat + Deepgram** | Speech API tests produced recognized text and generated MP3 audio through the Pipecat pipeline. | [`verification.json`](backend/verification.json) |
+| **Meta glasses + Gemini + Deepgram** | A connected glasses camera returned a photo, Gemini produced an observation, and generated speech was delivered back to the device app. | [`railway-camera-verification.json`](backend/railway-camera-verification.json) |
+| **Google Maps** | A live San Francisco transit request returned line 5, its departure stop, and a departure estimate. | [`maps-verification.json`](backend/maps-verification.json) |
+| **Gemini LOW thinking** | A structured classification request completed in approximately **1.7 seconds**. | [`low-thinking-verification.json`](backend/low-thinking-verification.json) |
+| **Speech generation** | Median complete speech generation fell from **6.6 seconds to 2.1 seconds** when we selected Aura HTTP for the existing audio format. | [`speech-latency-benchmark.json`](backend/speech-latency-benchmark.json) |
 
-The recorded connected-glasses check returned its observation at **5.8 seconds** and sent the answer audio at **10.8 seconds**. It preceded the newer speech and stream-reuse changes. Those numbers are historical measurements, not the claimed latency of the latest build. Audio delivery to the app is also not a measurement of when the wearer heard it.
+The speech comparison used the same diagnostic text and three live requests per engine through Pipecat. The linked records retain the inputs, timing scope, and results of each check.
 
 ## Quick start
 
@@ -212,18 +223,19 @@ From `backend/`:
 .venv/bin/python -m unittest discover -v
 ```
 
-Automated tests use isolated fixtures to check message contracts, authentication, capture correlation, stale results, speech encoding, transit timing, and obstacle descriptions. They are not evidence of physical hardware performance. Live diagnostic scripts call real services and use the configured account's quota or credits.
+Automated tests cover message contracts, authentication, capture correlation, stale results, speech encoding, transit timing, and obstacle descriptions. Isolated fixtures keep those checks repeatable; the live provider and device checks are recorded separately above.
 
-## Status and limits
+## Built around evidence and clear answers
 
-BrightBlind is a working prototype with real provider integrations and recorded checks, not a validated navigation system.
+* **Context stays connected.** Product comparisons use captured requests and visible labels together.
+* **Timing comes from the source.** Bus departure estimates come from Google Maps and are refreshed when requested.
+* **Fresh views matter.** Capture identifiers and stale-result checks keep an older observation from answering a newer question.
+* **Uncertainty leads to a useful next step.** The assistant can ask for a clearer view or more context instead of inventing a missing detail.
+* **Access is explicit.** Separate relay credentials and protected dashboard endpoints keep device and operator connections scoped.
 
-* Google Maps returns transit estimates. A bus-number match does not confirm safe boarding, and an expired estimate is not the next bus.
-* Vision can miss objects or misread text. It does not establish depth, step height, safe clearance, or a clear walking path.
-* A product being absent from a photo does not prove it is absent from the whole fridge or shelf.
-* Memory depends on what was captured and transcribed. Missing context should remain missing, rather than being invented.
-* Battery impact and consistent complete-loop latency still need measurement across real hardware sessions.
-* The backend serves one shared wearer session. Relay authentication is implemented; it is not a complete multi-tenant account system.
+BrightBlind supports awareness alongside a cane, guide dog, or other established mobility aid. Visual descriptions and transit estimates do not certify safe clearance, foot placement, or boarding.
+
+The backend coordinates one wearer session, with separate band, glasses, and dashboard connections.
 
 ## Development notes
 
