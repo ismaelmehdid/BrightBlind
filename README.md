@@ -76,14 +76,55 @@ BrightBlind supports camera activation on demand. For rapid follow-up questions,
 
 ## Architecture
 
-**Two wearables, one connection app, one backend.**
+**Wearables collect input. The app carries it. The backend coordinates voice, vision, memory, and transit.**
 
 ```mermaid
-flowchart LR
-    Band["Vexo band<br/>Hears the request"] --> App["BrightBlind app<br/>Connects the wearables"]
-    Glasses["Meta glasses<br/>Camera and speakers"] <--> App
-    App <--> Backend["BrightBlind backend<br/>Voice · Vision · Memory · Maps"]
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial","fontSize":"16px","lineColor":"#64748b","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","edgeLabelBackground":"#ffffff"},"flowchart":{"nodeSpacing":32,"rankSpacing":45,"curve":"linear","padding":16}}}%%
+flowchart TB
+    subgraph Wearables["01 · WEARABLES"]
+        direction LR
+        Band["Vexo band<br/>Audio · gestures"]
+        Glasses["Meta glasses<br/>Camera · audio"]
+    end
+
+    App["02 · BrightBlind<br/>iPhone app"]
+
+    subgraph Backend["03 · BACKEND · PYTHON / FASTAPI"]
+        Gateway["Gateway · /ws<br/>Role tokens"]
+        Coordinator["Coordinator<br/>Task and camera control"]
+        Voice["Voice pipeline<br/>Pipecat<br/>Deepgram"]
+        Vision["Vision + Match<br/>Gemini 4"]
+        Transit["Transit<br/>Google Maps"]
+        Memory["Recall memory<br/>Gemini 4"]
+        Store[("SQLite<br/>Memory · events")]
+        Dashboard["Dashboard<br/>Frames · events"]
+
+        Gateway <-->|Dispatch| Coordinator
+        Coordinator <-->|Voice turns| Voice
+        Coordinator <-->|Visual tasks| Vision
+        Coordinator <-->|Route requests| Transit
+        Coordinator <-->|Remembered context| Memory
+        Memory <--> Store
+        Coordinator -->|Live state| Dashboard
+    end
+
+    Band -->|Audio + taps| App
+    Glasses <-->|Photos + speech| App
+    App <-->|WebSocket| Gateway
+
+    classDef hardware fill:#EFF6FF,stroke:#2563EB,stroke-width:2px,color:#0F172A
+    classDef connection fill:#F8FAFC,stroke:#64748B,stroke-width:2px,color:#0F172A
+    classDef brain fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#0F172A
+    classDef service fill:#F5F3FF,stroke:#A78BFA,stroke-width:1.5px,color:#0F172A
+    classDef support fill:#ECFEFF,stroke:#0891B2,stroke-width:1.5px,color:#0F172A
+    class Band,Glasses hardware
+    class App,Gateway connection
+    class Coordinator brain
+    class Voice,Vision,Transit,Memory service
+    class Store,Dashboard support
 ```
+
+The processing cards name the frameworks and external APIs used by the backend. SQLite stores memory and events; the dashboard exposes the live workflow.
 
 1. **You ask.** Vexo sends the spoken request through the connection app.
 2. **BrightBlind decides what it needs.** Pipecat coordinates the voice workflow, and Deepgram transcribes the speech. The backend selects vision, memory, or transit information.
