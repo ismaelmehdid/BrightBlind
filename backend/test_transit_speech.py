@@ -20,6 +20,20 @@ class TransitSpeechTests(unittest.TestCase):
                                 datetime(2026,11,14,22,0,tzinfo=timezone.utc))
         self.assertIn('already passed', spoken)
 
+    def test_recently_elapsed_departure_is_already_past(self):
+        route = {'line': '5', 'stop': 'Market', 'departure_time': '2026-11-14T21:59:59Z'}
+        current = datetime(2026, 11, 14, 22, 0, tzinfo=timezone.utc)
+        self.assertIn('already passed', transit_speech(route, current))
+
+    def test_malformed_or_timezone_free_estimates_keep_line_and_stop(self):
+        for value in (123, '2026-11-14T21:00:00', 'unavailable'):
+            with self.subTest(value=value):
+                route = {'line': '5', 'stop': 'Market', 'departure_time': value}
+                spoken = transit_speech(route)
+                self.assertIn('line 5 from Market', spoken)
+                self.assertIn('could not read its departure time', spoken)
+
+
 class ProviderConfigurationTests(unittest.IsolatedAsyncioTestCase):
     async def test_low_is_sent_to_gemini(self):
         def respond(request):

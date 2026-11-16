@@ -9,7 +9,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from transit_speech import transit_speech
+from transit_speech import parse_departure, transit_speech
 from memory import Memory
 
 
@@ -349,20 +349,27 @@ class Coordinator:
             route = await self.providers.transit(origin, destination)
             if version != self.route_version: return
             self.bus = route
-            self.log('Transit · Google Maps', 'route_ready', f"Line {route['line']}, stop {route['stop']}", departure=route['departure_time'])
+            value = route.get('departure_time')
+            departure = parse_departure(value)
+            self.log('Transit · Google Maps', 'route_ready', f"Line {route['line']}, stop {route['stop']}", departure=value)
             await self.say(transit_speech(route))
-            if route.get('departure_time'):
-                departure = datetime.fromisoformat(route['departure_time'].replace('Z', '+00:00')).timestamp()
-                delay = max(0, departure - time.time() - 60)
-                if delay <= 1800:
-                    self.log('Coordinator', 'bus_watch_scheduled', 'Start camera at estimated departure minus 60 seconds; this is not a verified arrival feed.')
-                    async def watch():
-                        await asyncio.sleep(delay)
-                        if version == self.route_version:
-                            self.epoch += 1
-                            self.scene, self.target = 'bus', route['line'] + ' ' + route['headsign']
-                            await self.stream(self.epoch, 90)
-                    self.spawn(watch())
+            if departure is None or version != self.route_version:
+                return
+            timestamp = departure.timestamp()
+            remaining = timestamp - time.time()
+            if not 0 < remaining <= 1860:
+                return
+            self.log('Coordinator', 'bus_watch_scheduled', 'Start camera one minute before the estimated departure.')
+
+            async def watch():
+                await asyncio.sleep(max(0, timestamp - time.time() - 60))
+                if version == self.route_version and time.time() < timestamp:
+                    self.epoch += 1
+                    self.scene = 'bus'
+                    self.target = (route['line'] + ' ' + (route.get('headsign') or '')).strip()
+                    await self.stream(self.epoch, 90)
+
+            self.spawn(watch())
         except Exception as error:
             self.log('Transit · Google Maps', 'failed', str(error) if isinstance(error, RuntimeError) else type(error).__name__)
             if version == self.route_version: await self.say('Google Maps could not provide that route. Check the addresses and Maps credentials.')
