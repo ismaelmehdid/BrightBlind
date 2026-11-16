@@ -117,16 +117,32 @@ class Memory:
             if generation != self.generation:
                 return
             by_id = {r['id']: r for r in rows}
+            entries = result.get('memories')
+            if not isinstance(entries, list):
+                raise ValueError('Expected a list of memories')
             made = []
-            for m in result.get('memories', [])[:20]:
-                src = by_id.get(m.get('line_id')) or rows[-1]
-                kind = m.get('kind') if m.get('kind') in KINDS else 'fact'
-                self.db.execute('INSERT INTO memories(ts, kind, text, people, importance, context, bookmarked) VALUES(?,?,?,?,?,?,?)',
-                                (src['ts'], kind, str(m.get('text', ''))[:400], json.dumps(m.get('people', [])[:8]),
-                                 int(m.get('importance') or 2), str(m.get('context', ''))[:200], src['bookmarked']))
-                made.append(f"{kind}: {str(m.get('text', ''))[:160]}")
-            self.db.executemany('UPDATE lines SET distilled = 1 WHERE id = ?', [(r['id'],) for r in rows])
-            self.db.commit()
+            with self.db:
+                for entry in entries[:20]:
+                    source_id = entry.get('line_id') if isinstance(entry, dict) else None
+                    if type(source_id) is not int or source_id not in by_id:
+                        raise ValueError('Memory must reference a supplied line')
+                    src = by_id[source_id]
+                    kind = entry.get('kind')
+                    text = entry.get('text')
+                    people = entry.get('people')
+                    importance = entry.get('importance')
+                    context = entry.get('context')
+                    if (kind not in KINDS or not isinstance(text, str) or not text.strip()
+                            or not isinstance(people, list) or not all(isinstance(person, str) for person in people)
+                            or type(importance) is not int or not isinstance(context, str)):
+                        raise ValueError('Invalid memory result')
+                    self.db.execute(
+                        'INSERT INTO memories(ts, kind, text, people, importance, context, bookmarked) VALUES(?,?,?,?,?,?,?)',
+                        (src['ts'], kind, text[:400], json.dumps([person[:100] for person in people[:8]]),
+                         max(1, min(5, importance)), context[:200], src['bookmarked']),
+                    )
+                    made.append(f"{kind}: {text[:160]}")
+                self.db.executemany('UPDATE lines SET distilled = 1 WHERE id = ?', [(r['id'],) for r in rows])
             self.log('Memory · Gemini', 'distilled', f'{len(rows)} line(s) read, {len(made)} memory(ies) kept.',
                      memories=made[:5])
         except Exception as error:
