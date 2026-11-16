@@ -142,9 +142,14 @@ def make_app(providers=None):
             if hello.get('type') != 'hello' or role not in ('band', 'glasses'):
                 raise ValueError('First message must be hello with band or glasses client')
             if guarded and not matches(token, tokens[role]): raise ValueError('Token does not match role')
-            if role in coordinator.clients:
-                await coordinator.clients[role].close(code=1001, reason='Relay replaced by new connection')
+            previous = coordinator.clients.get(role)
             coordinator.clients[role] = socket
+            if role == 'glasses':
+                coordinator.reset_camera_connection()
+            if previous:
+                await previous.close(code=1001, reason='Relay replaced by new connection')
+            if coordinator.clients.get(role) is not socket:
+                return
             if role == 'band':
                 coordinator.voice.reset_audio()
                 await coordinator.voice.start()
@@ -159,6 +164,8 @@ def make_app(providers=None):
                     coordinator.spawn(coordinator.cooldown())
             allowed = {'band': {'audio', 'event', 'activity'}, 'glasses': {'photo', 'frame', 'state', 'button'}}
             async for raw in socket.iter_text():
+                if coordinator.clients.get(role) is not socket:
+                    return
                 if len(raw) > 5_000_000: raise ValueError('Message too large')
                 message = json.loads(raw)
                 if not isinstance(message, dict) or message.get('type') not in allowed[role]:
@@ -202,10 +209,7 @@ def make_app(providers=None):
                 del coordinator.clients[role]
                 coordinator.log('Transport', 'disconnected', role)
                 if role == 'glasses':
-                    coordinator.glasses_state = 'disconnected'
-                    coordinator.streaming = False
-                    coordinator.pending.clear()
-                    coordinator.epoch += 1
+                    coordinator.reset_camera_connection()
                 if role == 'band': coordinator.voice.reset_audio()
 
     return app

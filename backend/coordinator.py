@@ -153,6 +153,17 @@ class Coordinator:
     async def acknowledge_view(self):
         self.log('Coordinator', 'acknowledgement', 'Camera request sent; visual analysis is pending.')
 
+    def reset_camera_connection(self):
+        self.epoch += 1
+        self.streaming = False
+        self.glasses_state = 'disconnected'
+        self.pending.clear()
+        self.fresh_frame = None
+        self.want_frame = None
+        self.latest_image = None
+        self.last_frame = 0
+        self.warm_until = 0
+
     async def stop(self):
         self.epoch += 1
         self.plan_version += 1

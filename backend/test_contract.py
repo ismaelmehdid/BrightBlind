@@ -80,6 +80,21 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(receive_after_ack(glasses)['type'], 'stop_speaking')
                 self.assertFalse(client.get('/api/state').json()['streaming'])
 
+    def test_replacement_glasses_never_reuse_previous_relay_frame(self):
+        app = make_app(Fixtures())
+        with TestClient(app) as client, client.websocket_connect('/ws') as old:
+            old.send_json(message('hello', client='glasses'))
+            old.receive_json()
+            jpeg = base64.b64encode(b'\xff\xd8fixture\xff\xd9').decode()
+            old.send_json(message('frame', jpeg_b64=jpeg))
+            self.assertEqual(client.get('/api/state').status_code, 200)
+            with client.websocket_connect('/ws') as new:
+                new.send_json(message('hello', client='glasses'))
+                new.receive_json()
+                client.post('/api/question', json={'text': 'fridge'})
+                self.assertEqual(new.receive_json()['type'], 'capture')
+                self.assertIsNone(client.get('/api/state').json()['image'])
+
     def test_band_gesture_and_reconnect(self):
         with TestClient(make_app(Fixtures())) as client:
             with client.websocket_connect('/ws') as glasses, client.websocket_connect('/ws') as band:
