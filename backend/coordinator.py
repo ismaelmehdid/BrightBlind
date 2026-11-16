@@ -1,13 +1,14 @@
 """One wearer, two relays. Slow agents run independently of the voice transport."""
 import asyncio
 import base64
+import binascii
 import json
 import os
 import re
 import sqlite3
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from transit_speech import parse_departure, transit_speech
 from memory import Memory
@@ -378,32 +379,41 @@ class Coordinator:
         now = time.time()*1000
         if not isinstance(message.get('ts'), (int, float)) or not -5000 <= now-message['ts'] <= 5000:
             self.log('Vision', 'frame_rejected', 'Missing or stale timestamp'); return
-        if message['type'] == 'photo':
-            request = self.pending.pop(message.get('req_id'), None)
-            if not request or request['epoch'] != self.epoch or time.monotonic()-request['at'] > 20:
-                self.log('Vision', 'photo_rejected', 'No matching current capture request'); return
-            self.log('Vision', 'photo_received', message.get('source', '?'), ms=round((time.monotonic()-request['at'])*1000))
-            if self.glasses_state != 'streaming' and time.monotonic() < self.warm_until:
-                await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})      # next still comes from the live stream
-                self.spawn(self.cooldown())
-        else:
-            self.fresh_frame = (time.monotonic(), message)        # newest stream frame, kept even when not analysed
-            if self.want_frame and self.want_frame[0] == self.epoch and time.monotonic() - self.want_frame[1] < 6 and not self.frame_busy:
-                self.want_frame = None
-                self.frame_busy = True
-                self.last_frame = time.monotonic()
-                self.latest_image = {'jpeg_b64': message['jpeg_b64'], 'ts': message['ts'], 'scene': self.scene}
-                self.log('Vision', 'frame_from_live_stream', self.scene, age_ms=0)
-                self.spawn(self.analyze(message['jpeg_b64'], message['ts'], self.epoch, self.scene, self.target))
+        photo = message['type'] == 'photo'
+        request_id = message.get('req_id')
+        if photo:
+            request = self.pending.get(request_id) if isinstance(request_id, str) else None
+            if not request or request['epoch'] != self.epoch or time.monotonic() - request['at'] > 20:
+                self.log('Vision', 'photo_rejected', 'No matching current capture request')
                 return
-            if not self.streaming or self.frame_busy or time.monotonic()-self.last_frame < 2:
-                return
-        value = message.get('jpeg_b64', '')
-        if not isinstance(value, str) or len(value) > 4_000_000: return
+
+        value = message.get('jpeg_b64')
+        if not isinstance(value, str) or len(value) > 4_000_000:
+            return
         try:
             data = base64.b64decode(value, validate=True)
-            if not data.startswith(b'\xff\xd8'): return
-        except Exception: return
+        except (ValueError, binascii.Error):
+            return
+        if not data.startswith(b'\xff\xd8') or not data.endswith(b'\xff\xd9'):
+            return
+
+        if photo:
+            self.pending.pop(request_id, None)
+            self.log('Vision', 'photo_received', message.get('source', '?'), ms=round((time.monotonic() - request['at']) * 1000))
+            if self.glasses_state != 'streaming' and time.monotonic() < self.warm_until:
+                await self.send('glasses', {'type': 'stream', 'on': True, 'fps': 1})
+                self.spawn(self.cooldown())
+            if request['epoch'] != self.epoch:
+                return
+        else:
+            self.fresh_frame = (time.monotonic(), {'jpeg_b64': value, 'ts': message['ts']})
+            waiting = (self.want_frame and self.want_frame[0] == self.epoch
+                       and time.monotonic() - self.want_frame[1] < 6)
+            if waiting and not self.frame_busy:
+                self.want_frame = None
+                self.log('Vision', 'frame_from_live_stream', self.scene, age_ms=0)
+            elif not self.streaming or self.frame_busy or time.monotonic() - self.last_frame < 2:
+                return
         if self.frame_busy: return
         self.frame_busy = True
         self.last_frame = time.monotonic()

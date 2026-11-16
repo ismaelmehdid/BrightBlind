@@ -68,6 +68,8 @@ class ContractTests(unittest.TestCase):
                 glasses.send_json(message('photo', jpeg_b64=jpeg, w=10, h=10, source='capture', req_id='wrong'))
                 time.sleep(.05)
                 self.assertIsNone(client.get('/api/state').json()['image'])
+                glasses.send_json(message('frame', jpeg_b64='bad jpeg'))
+                glasses.send_json(message('photo', jpeg_b64='bad jpeg', req_id=capture['req_id']))
                 glasses.send_json(message('photo', jpeg_b64=jpeg, w=10, h=10, source='capture', req_id=capture['req_id']))
                 self.assertIn('milk', receive_after_ack(glasses)['text'])
                 client.post('/api/question', json={'text': 'shelf'})
