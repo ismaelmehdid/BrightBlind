@@ -120,9 +120,7 @@ def make_app(providers=None):
 
     @app.post('/api/stop')
     async def stop():
-        app.state.coordinator.warm_until = 0
-        await app.state.coordinator.stop()
-        await app.state.coordinator.voice.interrupt()
+        await app.state.coordinator.stop_now()
         return {'stopped': True}
 
     @app.websocket('/ws')
@@ -191,9 +189,9 @@ def make_app(providers=None):
                         coordinator.listen_until = time.monotonic() + 10
                         await coordinator.voice.interrupt()
                         if event == 'short': await coordinator.capture()      # the glasses' own button still means "look" 
-                    elif event == 'hold': await coordinator.stop()
+                    elif event == 'hold': await coordinator.stop_now()
                     elif event == 'free-fall':
-                        await coordinator.stop()
+                        await coordinator.stop_now()
                         await coordinator.send('band', {'type': 'led', 'color': '#dd3333'})
                         await coordinator.say('The band reported a possible fall. Are you okay? Ask someone nearby for help if needed.')
                     elif event == 'tap' and role == 'band':

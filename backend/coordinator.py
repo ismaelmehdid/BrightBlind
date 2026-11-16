@@ -178,6 +178,14 @@ class Coordinator:
         await self.send('band', {'type': 'led', 'color': '#2266ff'})
         self.log('Coordinator', 'stopped', 'Camera tasks invalidated; late results will be discarded.')
 
+    async def stop_now(self):
+        self.warm_until = 0
+        self.listen_until = 0
+        self.fresh_frame = None
+        self.want_frame = None
+        await self.stop()
+        await self.voice.interrupt()
+
     async def submit(self, text, source='typed', speaker='unknown'):
         text = text.strip()[:1000]
         if not text: return
@@ -188,9 +196,7 @@ class Coordinator:
             self.memory.keep(f'[{tag}] {text}', 'band', self.activity)
             self.recent_lines = (self.recent_lines + [f'{speaker}: {text}'])[-6:]
         if text.lower() in ('stop', 'got it', 'stop looking', 'stop watching', 'hold on'):
-            self.warm_until = 0                 # an explicit stop also turns the warm stream off
-            await self.stop()
-            await self.voice.interrupt()
+            await self.stop_now()
             return
         missing = self.live_missing(require_band=source == 'band')
         if os.getenv('LIVE_ONLY', '1') == '1' and missing:
@@ -235,10 +241,12 @@ class Coordinator:
         self.trace = {'text': text[:80], 'heard': time.monotonic()}      # one timing line per request (see log())
         # Tell the wearer at once that the request was heard; the answer follows.
         if os.getenv('WARM_STREAM', '0') == '1': self.warm_until = max(self.warm_until, time.monotonic() + 300)
+        self.plan_version += 1
+        version = self.plan_version
         self.spawn(self.voice.say('Okay.'))
         await self.send('band', {'type': 'led', 'color': '#00bb66'})
-        self.plan_version += 1
-        self.spawn(self.plan(text, self.plan_version))
+        if version == self.plan_version:
+            self.spawn(self.plan(text, version))
 
     async def plan(self, text, version):
         try:
@@ -248,7 +256,7 @@ class Coordinator:
             scene = plan.get('scene')
             if self.trace: self.trace.update(planned=time.monotonic(), scene=scene)
             self.log('Planner · '+plan.get('source', 'Gemini'), 'decision', scene, reason=plan.get('reply', ''), ms=round((time.monotonic()-started)*1000))
-            if scene == 'stop': await self.stop(); return
+            if scene == 'stop': await self.stop_now(); return
             if scene == 'reply':
                 if self.quiet_replies:
                     self.log('Coordinator', 'no_reply', 'Planner found no request in this sentence; staying silent.')

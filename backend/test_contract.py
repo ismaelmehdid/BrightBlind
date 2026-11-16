@@ -114,6 +114,16 @@ class ContractTests(unittest.TestCase):
                 replacement.send_json(message('hello', client='band', caps=['audio']))
                 self.assertEqual(replacement.receive_json()['type'], 'led')
 
+    def test_hold_turns_off_warm_camera_and_cancels_speech(self):
+        with patch.dict(os.environ, {'WARM_ON_CONNECT': '1'}):
+            with TestClient(make_app(Fixtures())) as client, client.websocket_connect('/ws') as glasses:
+                glasses.send_json(message('hello', client='glasses'))
+                glasses.receive_json()
+                self.assertTrue(glasses.receive_json()['on'])
+                glasses.send_json(message('button', press='hold'))
+                self.assertFalse(glasses.receive_json()['on'])
+                self.assertEqual(glasses.receive_json()['type'], 'stop_speaking')
+
     def test_role_tokens_and_browser_origin(self):
         with patch.dict(os.environ, {'BAND_RELAY_TOKEN': 'b'*32, 'GLASSES_RELAY_TOKEN': 'g'*32, 'DASHBOARD_TOKENS': 'd'*32}):
             with TestClient(make_app(Fixtures())) as client:
