@@ -264,7 +264,7 @@ From `backend/`:
 .venv/bin/python -m unittest discover -v
 ```
 
-Automated tests cover message contracts, authentication, capture correlation, stale results, speech encoding, transit timing, and obstacle descriptions. Isolated fixtures keep those checks repeatable; the live provider and device checks are recorded separately above.
+Automated tests cover message contracts, authentication, capture correlation, camera reconnects, stopping, speech encoding, transit timing, memory resets, and obstacle descriptions. The coordinator workflow runs these checks on backend changes and does not deploy. Isolated fixtures keep those checks repeatable; the live provider and device checks are recorded separately above.
 
 ## Built around evidence and clear answers
 

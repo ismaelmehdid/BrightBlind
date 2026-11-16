@@ -1,0 +1,39 @@
+name: BrightBlind coordinator checks
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/coordinator.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/coordinator.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1 libglib2.0-0
+          python -m pip install -r requirements.txt
+      - name: Run coordinator tests with provider fixtures
+        run: python -m unittest discover -v
+      - name: Check dashboard JavaScript syntax
+        run: node --input-type=module --check < static/dashboard.js
