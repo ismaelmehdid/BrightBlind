@@ -81,7 +81,8 @@ def make_app(providers=None):
     async def styles(): return FileResponse(ROOT / 'static' / 'dashboard.css', media_type='text/css')
 
     @app.get('/api/state')
-    async def state(): return app.state.coordinator.snapshot()
+    async def state(known_frame: str | None = None):
+        return app.state.coordinator.snapshot(known_frame)
 
     @app.post('/api/question', status_code=202)
     async def question(body: Question):

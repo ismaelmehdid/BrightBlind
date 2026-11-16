@@ -117,11 +117,14 @@ class Coordinator:
         self.db.execute('DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 300)')
         self.db.commit()
 
-    def snapshot(self):
+    def snapshot(self, known_frame=None):
+        image = self.latest_image
+        if image is not None and image['id'] == known_frame:
+            image = {key: image[key] for key in ('id', 'ts', 'scene')}
         return {'clients': list(self.clients), 'scene': self.scene, 'target': self.target,
                 'live_only': os.getenv('LIVE_ONLY', '1') == '1', 'live_missing': self.live_missing(),
                 'streaming': self.streaming, 'activity': self.activity, 'transit': self.bus,
-                'image': self.latest_image, 'providers': {
+                'image': image, 'providers': {
                     'deepgram': bool(os.getenv('DEEPGRAM_API_KEY')),
                     **({'elevenlabs': bool(os.getenv('ELEVENLABS_API_KEY'))} if os.getenv('VOICE_TTS_PROVIDER') == 'elevenlabs' else {}),
                     'gemini': bool(os.getenv('GEMINI_API_KEY')), 'maps': bool(os.getenv('GOOGLE_MAPS_API_KEY')),
@@ -324,7 +327,8 @@ class Coordinator:
             message = self.fresh_frame[1]
             self.frame_busy = True
             self.last_frame = time.monotonic()
-            self.latest_image = {'jpeg_b64': message['jpeg_b64'], 'ts': message['ts'], 'scene': self.scene}
+            self.latest_image = {'id': uuid.uuid4().hex, 'jpeg_b64': message['jpeg_b64'],
+                                 'ts': message['ts'], 'scene': self.scene}
             self.log('Vision', 'frame_from_live_stream', self.scene, age_ms=round((time.monotonic() - self.fresh_frame[0]) * 1000))
             self.spawn(self.analyze(message['jpeg_b64'], message['ts'], epoch, self.scene, self.target))
             return
@@ -437,7 +441,7 @@ class Coordinator:
         self.frame_busy = True
         self.last_frame = time.monotonic()
         epoch, scene, target = self.epoch, self.scene, self.target
-        self.latest_image = {'jpeg_b64': value, 'ts': message['ts'], 'scene': scene}
+        self.latest_image = {'id': uuid.uuid4().hex, 'jpeg_b64': value, 'ts': message['ts'], 'scene': scene}
         self.spawn(self.analyze(value, message['ts'], epoch, scene, target))
 
     async def analyze(self, image, captured_at, epoch, scene, target):

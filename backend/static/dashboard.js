@@ -50,8 +50,8 @@ function renderState(state) {
     setText('#scene', state.scene + (state.streaming ? ' · streaming' : ''));
     if (!state.image) {
         clearImage();
-    } else if (state.image.ts !== lastImage) {
-        lastImage = state.image.ts;
+    } else if (state.image.id !== lastImage) {
+        lastImage = state.image.id;
         $('#frame').src = 'data:image/jpeg;base64,' + state.image.jpeg_b64;
         $('#frame').hidden = false;
         $('#empty').hidden = true;
@@ -91,7 +91,8 @@ async function refresh() {
     polling = controller;
     const deadline = setTimeout(() => controller.abort(), 10000);
     try {
-        const state = await request('/api/state', { signal: controller.signal });
+        const path = lastImage ? '/api/state?' + new URLSearchParams({ known_frame: lastImage }) : '/api/state';
+        const state = await request(path, { signal: controller.signal });
         if (polling === controller) renderState(state);
     } catch (error) {
         if (polling !== controller) return;

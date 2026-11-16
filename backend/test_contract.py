@@ -72,6 +72,11 @@ class ContractTests(unittest.TestCase):
                 glasses.send_json(message('photo', jpeg_b64='bad jpeg', req_id=capture['req_id']))
                 glasses.send_json(message('photo', jpeg_b64=jpeg, w=10, h=10, source='capture', req_id=capture['req_id']))
                 self.assertIn('milk', receive_after_ack(glasses)['text'])
+                image = client.get('/api/state').json()['image']
+                self.assertEqual(image['jpeg_b64'], jpeg)
+                unchanged = client.get('/api/state', params={'known_frame': image['id']}).json()['image']
+                self.assertEqual(unchanged, {key: image[key] for key in ('id', 'ts', 'scene')})
+                self.assertEqual(client.get('/api/state', params={'known_frame': 'old'}).json()['image'], image)
                 client.post('/api/question', json={'text': 'shelf'})
                 stream = glasses.receive_json()
                 self.assertEqual((stream['type'], stream['on'], stream['fps']), ('stream', True, 1))
