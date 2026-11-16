@@ -66,6 +66,7 @@ class Memory:
         self.log = log                         # Coordinator.log: shows on the judges' dashboard
         self.last_line = 0.0
         self.busy = False
+        self.generation = 0
 
     def _rows(self, sql, args=()):
         cursor = self.db.cursor()
@@ -85,6 +86,8 @@ class Memory:
 
     def clear(self):
         """Forget everything: heard lines and distilled memories."""
+        self.generation += 1
+        self.last_line = 0.0
         lines = self.db.execute('DELETE FROM lines').rowcount
         memories = self.db.execute('DELETE FROM memories').rowcount
         self.db.commit()
@@ -105,11 +108,14 @@ class Memory:
         rows = self._rows('SELECT * FROM lines WHERE distilled = 0 ORDER BY ts LIMIT 60')
         if not rows: return
         self.busy = True
+        generation = self.generation
         try:
             text = DISTILL_PROMPT + '\n'.join(
                 f"[line {r['id']}] {_clock(r['ts'])} ({r['activity'] or 'no band data'}, {r['source']})"
                 f"{' BOOKMARKED' if r['bookmarked'] else ''}: {json.dumps(r['text'])}" for r in rows)
             result = await self.providers.gemini(text, DISTILL_SCHEMA)
+            if generation != self.generation:
+                return
             by_id = {r['id']: r for r in rows}
             made = []
             for m in result.get('memories', [])[:20]:
@@ -155,7 +161,10 @@ class Memory:
                          for r in lines) or '(none)'
         prompt = (ANSWER_PROMPT + f"\nNow: {datetime.now().strftime('%A %H:%M')}\n\nMEMORIES:\n{mem}\n\nRECENT LINES:\n{said}"
                   f"\n\nQUESTION: {json.dumps(question)}")
+        generation = self.generation
         result = await self.providers.gemini(prompt, ANSWER_SCHEMA)
+        if generation != self.generation:
+            return "Memory was cleared while I was checking."
         return str(result.get('answer') or 'My memory has no answer for that.')[:700]
 
     def snapshot(self, limit=12):
