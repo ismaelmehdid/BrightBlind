@@ -6,7 +6,7 @@ app points at. It keeps:
             observation, each with the band's activity at that moment (still / walk / run, steps)
   memories  short facts Gemini distills from the lines: task, plan, person, fact, idea, feeling, moment
 A tap on the band bookmarks the last 30 seconds. scene=memory questions are answered here, in-process,
-from all memories plus recent lines: a day of memory fits easily in Gemini 4's context, so no search.
+from a bounded window of distilled memories and recent lines.
 """
 import asyncio
 import json
@@ -17,6 +17,7 @@ from datetime import datetime
 DISTILL_EVERY = 30        # seconds between distill passes (one Gemini call each, only when there are new lines)
 DISTILL_QUIET = 6         # wait until nobody spoke for this long
 BOOKMARK_SECONDS = 30     # a tap keeps the last 30 seconds
+PROMPT_MEMORIES = 120
 ANSWER_LINES = 150        # recent lines given with every question
 KINDS = ['task', 'plan', 'person', 'fact', 'idea', 'feeling', 'moment']
 
@@ -25,6 +26,9 @@ CREATE TABLE IF NOT EXISTS lines(id INTEGER PRIMARY KEY, ts REAL, text TEXT, sou
     steps INTEGER, bookmarked INTEGER DEFAULT 0, distilled INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS memories(id INTEGER PRIMARY KEY, ts REAL, kind TEXT, text TEXT, people TEXT,
     importance INTEGER, context TEXT, bookmarked INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS memories_by_ts ON memories(ts, id);
+CREATE INDEX IF NOT EXISTS lines_by_ts ON lines(ts, id);
+CREATE INDEX IF NOT EXISTS undistilled_lines_by_ts ON lines(ts, id) WHERE distilled = 0;
 """
 
 DISTILL_PROMPT = """You are the memory of a person who wears a wristband microphone and camera glasses. Below are
@@ -158,16 +162,20 @@ class Memory:
 
     # --- answering -----------------------------------------------------------------------
 
+    def _prompt_memories(self):
+        rows = self._rows('SELECT * FROM memories ORDER BY ts DESC, id DESC LIMIT ?', (PROMPT_MEMORIES,))
+        return list(reversed(rows))
+
     def context(self, lines=30):
         """Memories and recent lines as text, for a prompt that needs them next to an image."""
-        memories = self._rows('SELECT * FROM memories ORDER BY ts')
+        memories = self._prompt_memories()
         recent = list(reversed(self._rows('SELECT * FROM lines ORDER BY ts DESC LIMIT ?', (lines,))))
         mem = '\n'.join(f"- [{m['kind']}] {m['text']}" for m in memories) or '(none)'
         said = '\n'.join(f"- {r['text']}" for r in recent if r['source'] == 'band') or '(none)'
         return f'MEMORIES:\n{mem}\n\nRECENT LINES HEARD:\n{said}'
 
     async def answer(self, question):
-        memories = self._rows('SELECT * FROM memories ORDER BY ts')
+        memories = self._prompt_memories()
         lines = list(reversed(self._rows('SELECT * FROM lines ORDER BY ts DESC LIMIT ?', (ANSWER_LINES,))))
         if not memories and not lines:
             return 'I have no memories yet. Talk near the band, or tap it to keep a moment.'

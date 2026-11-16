@@ -44,3 +44,12 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
         self.memory.keep('A later line', 'band', {})
         self.assertEqual(self.memory.snapshot(), {'lines': 2, 'memories': []})
         self.assertEqual(self.db.execute('SELECT SUM(distilled) FROM lines').fetchone(), (0,))
+
+    async def test_context_keeps_recent_memories_and_preserves_older_rows(self):
+        self.db.executemany(
+            'INSERT INTO memories(ts, kind, text) VALUES(?, ?, ?)',
+            [(i, 'fact', f'Unique memory {i:03}') for i in range(140)],
+        )
+        self.assertIn('Unique memory 139', self.memory.context())
+        self.assertNotIn('Unique memory 000', self.memory.context())
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM memories').fetchone(), (140,))
